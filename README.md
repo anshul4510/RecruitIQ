@@ -1,22 +1,27 @@
 # RecruitIQ — AI-Powered Resume Screening & Ranking System
 
-RecruitIQ is an AI-driven Applicant Tracking System (ATS) that intelligently screens, ranks, and shortlists candidates based on job requirements using LLMs, semantic embeddings, and explainable scoring logic.  
+RecruitIQ is an AI-driven Applicant Tracking System (ATS) that intelligently screens, ranks, and shortlists candidates based on job requirements using advanced LLMs, semantic embeddings, and explainable scoring logic.  
 It is designed to reduce recruiter effort, improve decision transparency, and support data-driven hiring.
 
 ---
 
 ## Key Features
 
-### Intelligent Resume Parsing
-- Extracts structured information from PDF resumes using an LLM (Groq)
+### Intelligent Resume & Job Description Parsing
+- Extracts structured information from PDF resumes using the `openai/gpt-oss-120b` LLM via the Groq API
+- Robust JSON extraction with built-in API rate limit handling
 - Automatically identifies:
-  - Name
-  - Skills
+  - Name and contact info
+  - Extensive skill sets
   - Years of experience
   - Education level
   - Certifications
   - Project count
   - Salary expectations
+  - Preferred qualifications (from job descriptions)
+
+### PDF OCR Functionality
+- Integrated robust OCR module to reliably extract text from job requirement PDF files and scanned resumes, ensuring no candidate data is missed
 
 ### Semantic Resume Matching
 - Uses sentence embeddings to compute semantic similarity between:
@@ -25,21 +30,21 @@ It is designed to reduce recruiter effort, improve decision transparency, and su
 - Captures meaning beyond keyword matching
 - Ranks candidates by true relevance to the role
 
-### Explainable Candidate Scoring
-Each candidate is scored using a transparent, weighted system:
+### Predictive Modeling & Explainable Scoring
+Each candidate is scored and ranked using a trained **XGBoost model** combined with a transparent feature engineering pipeline:
 - Semantic similarity score
 - Skill match percentage
 - Experience alignment
 - Education level weighting
 
-Recruiters can clearly see why a candidate ranks higher or lower.
+Recruiters can clearly see why a candidate ranks higher or lower based on explainable XGBoost match scores.
 
 ### Skill Gap Analysis
 - Displays matched skills and missing required skills
 - Helps recruiters identify immediate fit and upskilling potential
 
 ### Recruiter Workflow Support
-- Decision dropdown per candidate:
+- Interactive Streamlit dashboard with a decision dropdown per candidate:
   - Unreviewed
   - Shortlisted
   - Rejected
@@ -68,7 +73,7 @@ At-a-glance metrics:
 
 ## Scoring Logic (Explainable AI)
 
-Final candidate score is computed using a weighted combination of:
+Final candidate rank and match score is generated using an XGBoost machine learning model that relies on engineered features, including:
 
 | Component        | Description                                         |
 |------------------|-----------------------------------------------------|
@@ -84,17 +89,17 @@ This ensures fair, transparent, and bias-aware ranking.
 ## Tech Stack
 
 **Frontend & UI**
-- Streamlit
+- Streamlit (Interactive Dashboard)
 
 **AI / ML**
-- Groq LLM (Resume Parsing)
-- Sentence Transformers (Embeddings)
+- Groq API (`openai/gpt-oss-120b` model for robust LLM parsing)
+- XGBoost (Candidate ranking & match scoring)
+- Sentence Transformers (Semantic embeddings)
 - Cosine Similarity
 
-**Data Processing**
-- Pandas
-- Custom feature engineering pipeline
+**Data Processing & Document Parsing**
+- Pandas (Custom feature engineering)
+- PDF OCR (Text extraction for job descriptions and resumes)
+- Custom JSON extraction & API rate limit handlers
 
 ---
-
-

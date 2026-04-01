@@ -2,11 +2,14 @@ streamlit
 pandas
 numpy
 scikit-learn
+xgboost
 sentence-transformers
 faiss-cpu
 plotly
 python-dotenv
 pdfplumber
+pdf2image
+pytesseract
 langchain
 langchain-openai
 langchain-groq
