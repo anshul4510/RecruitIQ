@@ -125,13 +125,33 @@ RecruitIQ employs a robust, loosely coupled architecture separating the extracti
 
 ---
 
-## ✨ Features (Detailed)
-
+### System Capabilities
 1.  **Semantic Responsibility Scoring**: Analyzes the contextual overlap of previous work responsibilities with required duties, completely ignoring specific buzzwords in favor of meaning.
 2.  **Seniority Mapping**: Auto-detects hierarchical level requirements (Junior vs. Senior/Lead) in titles and applies strong penalties for mismatching strata to prevent over-qualifications or under-qualifications.
 3.  **Job Stability Heuristic**: Averages the duration of stints across multiple companies. Serial "job hoppers" (< 6 months per role) are flagged and penalized algorithmically.
 4.  **Online Presence Density**: Rewards verifiable external portfolios (GitHub, Kaggle, Personal sites).
 5.  **Multi-Dimensional Score Breakdown**: Generates interactive Plotly Waterfall charts calculating exact base scores plus/minus semantic, educational, and experience factors.
+
+---
+
+## 🧪 Engineered ML Training Features (13 Core Metrics)
+The XGBoost ranker is trained using exactly 13 mathematically transformed variables derived from LLM JSON parsing. They are as follows:
+
+| Feature Name | Description & Processing Logic |
+| :--- | :--- |
+| **`skill_overlap_score`** | Ratio of strictly matched skills after applying the synonym map (e.g. `JS` -> `JavaScript`). |
+| **`education_match_score`** | Boolean-inclusive weighted scoring of degree names against job education requisites. |
+| **`responsibility_similarity_score`** | Latent cosine distance via SentenceTransformer embeddings of raw responsibility text. |
+| **`language_match_score`** | Binary flag penalizing lack of spoken languages if the JD mandates them. |
+| **`certification_match_score`** | Bonus weighting for verifiable certifications/providers natively extracted. |
+| **`experience_years_score`** | Inverse decay fraction: extracted candidate total working years divided by JD minimum requirements. |
+| **`projects_count_score`** | Normalized count of total personal/professional projects, capped using MinMax scaling. |
+| **`major_match_score`** | Semantic text similarity specifically determining if the degree *Major* aligns with the job hierarchy. |
+| **`seniority_match_score`** | Enum mapped mismatch check ensuring 'Junior' resumes do not score highly on 'Lead' roles. |
+| **`skill_breadth_score`** | Measures raw technical capacity by evaluating the sheer volume of uniquely extracted tech skills. |
+| **`job_stability_score`** | Career velocity vector determining the average length attained per listed role using `start_dates` and `end_dates`. |
+| **`online_presence_score`** | Binary confidence boolean ensuring candidates provided live, non-empty social/coding verification vectors. |
+| **`responsibility_depth_score`** | Heuristic gauge measuring the length and textual complexity describing the candidate's impact to weed out vague resumes. |
 
 ---
 
@@ -214,14 +234,6 @@ RecruitIQ employs a robust, loosely coupled architecture separating the extracti
 
 ---
 
-## 📸 Screenshots / Demo Section
-
-*(Add your screenshots here via relative markdown mapping)*
-*   `![Dashboard View](./assets/dashboard.png)`
-*   `![Explainability Charts](./assets/charts.png)`
-
----
-
 ## 🔌 API Documentation
 
 *RecruitIQ relies on internal service classes. Here is the primary programmatic interface for model inference:*
@@ -267,15 +279,4 @@ We adhere strictly to robust software engineering principles.
 3. Provide model drift metrics if advocating for a replacement `.pkl` model.
 4. Issue Pull Requests to development branches strictly.
 
----
 
-## 📜 License
-
-This software is released under the **MIT License**. Standard conditions of usage, warranty disclaimers, and distribution apply.
-
----
-
-## 👨‍💻 Team Details
-
-*   **[Your Name / Username]** - Data Engineer, System Architect, Machine Learning Developer.
-*   Connect on [LinkedIn](#) | View on [GitHub](#)
