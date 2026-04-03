@@ -15,7 +15,10 @@ class ResumeScorerModel:
             model_path = os.path.join(base_dir, "model", "model.pkl")
         
         try:
+            print(f"DEBUG: Loading model from {model_path}")
             self.model = joblib.load(model_path)
+            if hasattr(self.model, 'feature_names_in_'):
+                print(f"DEBUG: Model feature names: {self.model.feature_names_in_}")
         except Exception as e:
             print(f"Could not load model from {model_path}. Did you run model/train.py? Error: {e}")
             self.model = None

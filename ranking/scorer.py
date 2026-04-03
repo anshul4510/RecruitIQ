@@ -3,7 +3,11 @@ def rank_candidates(candidates):
     candidates is a list of dictionaries, where each dict has at least 'score'.
     Sorts descending by score.
     """
-    return sorted(candidates, key=lambda x: x.get('score', 0), reverse=True)
+    return sorted(candidates, key=lambda x: (
+        x.get('score', 0),
+        x.get('quality', {}).get('quality_score', 0) if isinstance(x.get('quality', {}), dict) else 0,
+        x.get('match_breakdown', {}).get('skill_overlap_score', 0) if isinstance(x.get('match_breakdown', {}), dict) else 0
+    ), reverse=True)
 
 def filter_candidates(candidates, min_score=None, required_skills=None):
     """

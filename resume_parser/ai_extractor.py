@@ -21,6 +21,8 @@ class ResumeAIExtractor:
                 Return ONLY valid JSON in the exact following format, filling in the attributes based on the text:
                 {{
                     "name": "",
+                    "email": "",
+                    "phone": "",
                     "address": "",
                     "career_objective": "",
                     "skills": [],
@@ -82,6 +84,8 @@ class ResumeAIExtractor:
         except json.JSONDecodeError:
             return {
                 "name": "Unknown",
+                "email": "",
+                "phone": "",
                 "address": "",
                 "career_objective": "",
                 "skills": [],

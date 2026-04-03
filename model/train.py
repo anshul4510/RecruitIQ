@@ -33,15 +33,46 @@ def train_model(data_path, model_output_path):
         'responsibility_similarity_score', 
         'language_match_score', 
         'certification_match_score',
-        'experience_match_score'
+        'experience_years_score',
+        'projects_count_score',
+        'major_match_score',
+        'seniority_match_score',
+        'skill_breadth_score',
+        'job_stability_score',
+        'online_presence_score',
+        'responsibility_depth_score'
     ]
 
     X = df_features[features]
     y = df_features['target']
 
-    print("Training XGBoost Regressor...")
-    model = XGBRegressor(n_estimators=100, learning_rate=0.1, max_depth=5, random_state=42)
-    model.fit(X, y)
+    print("Finding the best parameters using GridSearchCV...")
+    from sklearn.model_selection import GridSearchCV
+    
+    param_grid = {
+        'n_estimators': [50, 100, 200],
+        'learning_rate': [0.01, 0.05, 0.1],
+        'max_depth': [3, 5, 7],
+        'subsample': [0.8, 1.0],
+        'colsample_bytree': [0.8, 1.0]
+    }
+    
+    base_model = XGBRegressor(random_state=42)
+    grid_search = GridSearchCV(
+        estimator=base_model,
+        param_grid=param_grid,
+        cv=3,
+        scoring='r2', # Optimizing for Variance Explained
+        n_jobs=-1,
+        verbose=1
+    )
+    
+    grid_search.fit(X, y)
+    
+    print(f"Best Parameters found for the dataset: {grid_search.best_params_}")
+    print(f"Best Cross-Validation Score (R^2): {grid_search.best_score_:.4f}")
+    
+    model = grid_search.best_estimator_
 
     print(f"Saving model to {model_output_path}...")
     os.makedirs(os.path.dirname(model_output_path), exist_ok=True)
