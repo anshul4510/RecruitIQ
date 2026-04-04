@@ -62,31 +62,14 @@ def calculate_skill_overlap(resume_skills, jd_skills):
     overlap = r_skills_lower.intersection(j_skills_lower)
     return len(overlap) / len(j_skills_lower)
 
+from utils.education_processor import EducationProcessor
+
 def calculate_education_match(resume_degrees, jd_edu):
-    jd_edu_str = str(jd_edu).strip().lower()
-    if pd.isna(jd_edu) or not jd_edu_str or jd_edu_str in ['nan', 'none', 'n/a', '[]', "['']"]:
-        # Give candidate full credit if no clear educational requirement is specified
-        return 1.0 
-        
-    if not resume_degrees:
-        return 0.0
-    
-    match_score = 0.0
-    
-    for degree in resume_degrees:
-        if not degree:
-            continue
-        degree_str = str(degree).lower()
-        if degree_str in jd_edu_str or jd_edu_str in degree_str:
-            return 1.0
-        
-        # Check general keywords
-        if 'bachelor' in jd_edu_str and ('b.sc' in degree_str or 'b.tech' in degree_str or 'b.a' in degree_str or 'bba' in degree_str or 'bca' in degree_str):
-            match_score = max(match_score, 0.8)
-        if 'master' in jd_edu_str and ('m.sc' in degree_str or 'm.tech' in degree_str or 'm.a' in degree_str or 'mba' in degree_str or 'mca' in degree_str):
-            match_score = max(match_score, 0.8)
-            
-    return match_score
+    """
+    Expert education matching logic using the redesigned EducationProcessor.
+    Handles hierarchical matching and field similarity.
+    """
+    return EducationProcessor.calculate_match_score(resume_degrees, jd_edu)
 
 def extract_years_from_text(text):
     if not text or pd.isna(text):
@@ -219,7 +202,7 @@ def generate_features_for_dataframe(df, model):
     
     df_feat['parsed_degrees'] = df_feat['degree_names'].apply(parse_list_string)
     df_feat['education_match_score'] = df_feat.apply(
-        lambda row: calculate_education_match(row['parsed_degrees'], row['educationaL_requirements']), axis=1)
+        lambda row: calculate_education_match(row['parsed_degrees'], row.get('educational_requirements', row.get('educationaL_requirements', ''))), axis=1)
     
     # Text Similarity
     df_feat['responsibility_similarity_score'] = df_feat.apply(
@@ -288,7 +271,7 @@ def generate_features_for_dataframe(df, model):
         
     return df_feat[features_columns + ['target']]
 
-def engineer_features_for_single(resume_json, jd_json, model):
+def engineer_features_for_single(resume_json, jd_json, model, jd_embeddings=None):
     r_skills = resume_json.get('skills', [])
     j_skills = jd_json.get('skills_required', [])
     skill_score = calculate_skill_overlap(r_skills, j_skills)
@@ -299,7 +282,15 @@ def engineer_features_for_single(resume_json, jd_json, model):
     
     r_resp = " ".join(resume_json.get('responsibilities', []))
     j_resp = " ".join(jd_json.get('responsibilities', []))
-    resp_score = calculate_similarity(r_resp, j_resp, model)
+    
+    # Use pre-calculated JD embeddings if available
+    if jd_embeddings and 'responsibilities' in jd_embeddings:
+        r_resp_emb = model.encode(r_resp, convert_to_tensor=True)
+        j_resp_emb = jd_embeddings['responsibilities']
+        from sentence_transformers import util
+        resp_score = float(util.cos_sim(r_resp_emb, j_resp_emb)[0][0])
+    else:
+        resp_score = calculate_similarity(r_resp, j_resp, model)
     
     exp_years_score = calculate_exp_years_score(resume_json.get('experience_years', 0), jd_json.get('experience_requirement', ''))
     
@@ -310,7 +301,17 @@ def engineer_features_for_single(resume_json, jd_json, model):
     
     projects_score = min(float(resume_json.get('projects_count', 0))/10.0, 1.0)
     
-    major_score = calculate_similarity(" ".join(resume_json.get('major_field_of_studies', [])), jd_json.get('job_position_name', ''), model)
+    r_major = " ".join(resume_json.get('major_field_of_studies', []))
+    j_pos = jd_json.get('job_position_name', '')
+    
+    # Use pre-calculated JD embeddings if available
+    if jd_embeddings and 'job_position_name' in jd_embeddings:
+        r_major_emb = model.encode(r_major, convert_to_tensor=True)
+        j_pos_emb = jd_embeddings['job_position_name']
+        from sentence_transformers import util
+        major_score = float(util.cos_sim(r_major_emb, j_pos_emb)[0][0])
+    else:
+        major_score = calculate_similarity(r_major, j_pos, model)
     
     seniority_score = calculate_seniority_match(resume_json.get('positions', []), jd_json.get('job_position_name', ''))
     

@@ -26,6 +26,7 @@ def extract_jd_text(pdf_file) -> Optional[str]:
                     text_content.append(page_text)
                     
         full_text = "\n".join(text_content).strip()
+        logger.info(f"Digital text extraction complete. Extracted {len(full_text)} characters.")
         
         # If we got meaningful digital text, return it
         if len(full_text) > 50:
@@ -57,9 +58,8 @@ def _extract_with_ocr(pdf_file) -> str:
             pdf_bytes = pdf_file.read()
             images = convert_from_bytes(pdf_bytes)
         else:
-            images = convert_from_path(pdf_file)
-            
-        ocr_text = []
+            logger.info(f"Extracting OCR from {len(images)} images (pages).")
+            ocr_text = []
         for img in images:
             text = pytesseract.image_to_string(img)
             ocr_text.append(text)

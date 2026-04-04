@@ -1,21 +1,31 @@
 import os
 import json
 from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+# from langchain_groq import ChatGroq
+from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
-# Initialize the Groq LLM
+# Initialize the OpenAI LLM (was Groq)
 try:
-    llm = ChatGroq(
-        api_key=os.getenv("GROQ_API_KEY"),
-        model_name="openai/gpt-oss-120b", 
-        temperature=0
+    # llm = ChatGroq(
+    #     api_key=os.getenv("GROQ_API_KEY"),
+    #     model_name="openai/gpt-oss-120b", 
+    #     temperature=0
+    # )
+    llm = ChatOpenAI(
+        api_key=os.getenv("OPENAI_API_KEY"),
+        model="gpt-4o-mini", 
+        temperature=0,
+        model_kwargs={"response_format": {"type": "json_object"}}
     )
 except Exception as e:
-    print(f"Warning: Failed to initialize ChatGroq: {e}. Please ensure GROQ_API_KEY is in your .env file.")
+    logger.error(f"Failed to initialize ChatOpenAI: {e}. Please ensure OPENAI_API_KEY is in your .env file.")
     llm = None
 
 def parse_resume(text):
@@ -23,11 +33,11 @@ def parse_resume(text):
     Passes the raw resume text to the LLM and demands a JSON response with the requested fields.
     """
     if not llm:
-        return {"error": "LLM was not initialized. Check GROQ_API_KEY in .env"}
+        return {"error": "LLM was not initialized. Check OPENAI_API_KEY in .env"}
 
     prompt_template = """
-    You are an expert HR parsed. Extract the following information from the provided resume text and return it as a valid JSON object ONLY, with no preamble or explanation.
-    Do not add formatting like ```json ... ```, just return the raw JSON string.
+    You are an expert HR parser. Extract the following information from the provided resume text.
+    Return ONLY a valid JSON object. Do not add formatting like ```json ... ```.
 
     Required JSON keys:
     - career_objective (str)
@@ -60,14 +70,13 @@ def parse_resume(text):
         # Strictly limit the input text to 4000 chars to never exceed Groq TPM limits
         text = text[:4000]
         response = chain.invoke({"text": text})
+        logger.info("LLM resume parsing request sent.")
         content = response.content.strip()
-        import re
-        match = re.search(r'\{.*\}', content, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        return json.loads(content)
+        parsed = json.loads(content)
+        logger.info("Successfully parsed LLM resume JSON natively.")
+        return parsed
     except Exception as e:
-        print(f"Error parsing resume with LLM: {e}")
+        logger.error(f"Error parsing resume with LLM: {e}")
         return {"error": str(e)}
 
 def parse_job_description(text):
@@ -75,11 +84,11 @@ def parse_job_description(text):
     Passes the raw JD text to the LLM and demands a JSON response with the requested fields.
     """
     if not llm:
-        return {"error": "LLM was not initialized. Check GROQ_API_KEY in .env"}
+        return {"error": "LLM was not initialized. Check OPENAI_API_KEY in .env"}
 
     prompt_template = """
-    You are an expert HR parser. Extract the following information from the provided job description text and return it as a valid JSON object ONLY, with no preamble or explanation.
-    Do not add formatting like ```json ... ```, just return the raw JSON string.
+    You are an expert HR parser. Extract the following information from the provided job description text.
+    Return ONLY a valid JSON object. Do not add formatting like ```json ... ```.
 
     CRITICAL INSTRUCTION: The text may be poorly formatted due to OCR scanning. You MUST read and analyze the ENTIRE document thoroughly.
     Pay special attention to BOTH "Required Qualifications" AND "Preferred Qualifications" / "Additional skills". You MUST extract and combine skills/requirements from ALL sections.
@@ -101,12 +110,11 @@ def parse_job_description(text):
     try:
         text = text[:4000]
         response = chain.invoke({"text": text})
+        logger.info("LLM JD parsing request sent.")
         content = response.content.strip()
-        import re
-        match = re.search(r'\{.*\}', content, re.DOTALL)
-        if match:
-            return json.loads(match.group())
-        return json.loads(content)
+        parsed = json.loads(content)
+        logger.info("Successfully parsed LLM JD JSON natively.")
+        return parsed
     except Exception as e:
-        print(f"Error parsing job description with LLM: {e}")
+        logger.error(f"Error parsing job description with LLM: {e}")
         return {"error": str(e)}

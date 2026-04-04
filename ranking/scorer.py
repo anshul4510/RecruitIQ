@@ -1,13 +1,18 @@
+import logging
+logger = logging.getLogger(__name__)
+
 def rank_candidates(candidates):
     """
     candidates is a list of dictionaries, where each dict has at least 'score'.
     Sorts descending by score.
     """
-    return sorted(candidates, key=lambda x: (
+    sorted_list = sorted(candidates, key=lambda x: (
         x.get('score', 0),
         x.get('quality', {}).get('quality_score', 0) if isinstance(x.get('quality', {}), dict) else 0,
         x.get('match_breakdown', {}).get('skill_overlap_score', 0) if isinstance(x.get('match_breakdown', {}), dict) else 0
     ), reverse=True)
+    logger.info(f"Sorted {len(candidates)} candidates.")
+    return sorted_list
 
 def filter_candidates(candidates, min_score=None, required_skills=None):
     """
@@ -27,4 +32,5 @@ def filter_candidates(candidates, min_score=None, required_skills=None):
             return len(req_skills_lower.intersection(c_skills)) > 0
         filtered = [c for c in filtered if has_skills(c)]
         
+    logger.info(f"Filtered {len(candidates)} candidates down to {len(filtered)} (min_score={min_score}, required_skills={required_skills}).")
     return filtered

@@ -1,8 +1,10 @@
 import os
 import sys
 import json
+import time
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 
 # Add parent directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,7 +14,14 @@ from parser.llm_parser import parse_job_description
 from resume_parser.ai_extractor import ResumeAIExtractor
 from model.predict import ResumeScorerModel
 from ranking.scorer import rank_candidates, filter_candidates
-from explainability.explainer import generate_explanation, analyze_resume_quality
+from explainability.explainer import analyze_and_explain
+from utils.logging_config import setup_logging
+from utils.cache_manager import pipeline_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+# Initialize logging
+logger = setup_logging(__name__)
+logger.info("RecruitIQ Application Started")
 
 st.set_page_config(page_title="RecruitIQ", layout="wide")
 
@@ -35,53 +44,186 @@ with st.sidebar:
     if st.button("Process & Rank Candidates"):
         if not jd_file or not resume_files:
             st.error("Please upload both JD and at least one Resume.")
+            logger.warning("Attempted to process without uploading JD or resumes.")
         else:
+            logger.info(f"Starting processing pipeline for {len(resume_files)} resumes.")
+            t_pipeline_start = time.time()
+            runtime_stats = {
+                "OCR_Latency": [],
+                "LLM_Inference": [],
+                "Embedding_Generation": [],
+                "XGBoost_Inference": [],
+                "Total_Pipeline": []
+            }
+            
+            @st.cache_data(show_spinner=False)
+            def cached_parse_jd(text):
+                return parse_job_description(text)
+
             with st.spinner(f"Extracting Job Description features..."):
+                t_jd_start = time.time()
                 jd_text = extract_text_from_pdf(jd_file)
+                t_jd_ocr = time.time()
+                runtime_stats["OCR_Latency"].append(t_jd_ocr - t_jd_start)
+                
                 if not jd_text:
                     st.error("Could not extract any text from the Job Description PDF. It might be a scanned image.")
                 else:
-                    st.session_state.jd_parsed = parse_job_description(jd_text)
+                    st.session_state.jd_parsed = cached_parse_jd(jd_text)
+                    t_jd_llm = time.time()
+                    runtime_stats["LLM_Inference"].append(t_jd_llm - t_jd_ocr)
+                    
                     if not st.session_state.jd_parsed:
-                        st.error("LLM failed to parse Job Description. This is likely a Groq API Rate Limit or invalid key.")
+                        st.error("LLM failed to parse Job Description. This is likely an API Rate Limit or invalid key.")
                     elif "error" in st.session_state.jd_parsed:
-                        st.error(f"Groq API Error on Job Description: {st.session_state.jd_parsed['error']}")
+                        st.error(f"API Error on Job Description: {st.session_state.jd_parsed['error']}")
+                    else:
+                        logger.info("Successfully parsed Job Description.")
             
             scorer = ResumeScorerModel()
+            
+            # --- NEW: JD Pre-embedding Optimization ---
+            jd_embeddings = {}
+            try:
+                if st.session_state.jd_parsed and "error" not in st.session_state.jd_parsed:
+                    logger.info("Pre-calculating JD embeddings for optimization.")
+                    jd_resp = " ".join(st.session_state.jd_parsed.get('responsibilities', []))
+                    jd_pos = st.session_state.jd_parsed.get('job_position_name', '')
+                    jd_embeddings = {
+                        'responsibilities': scorer.sbert.encode(jd_resp, convert_to_tensor=True),
+                        'job_position_name': scorer.sbert.encode(jd_pos, convert_to_tensor=True)
+                    }
+            except Exception as e:
+                logger.warning(f"JD Pre-embedding failed: {e}. Falling back to default scoring.")
             
             candidates = []
             progress_bar = st.progress(0)
             
-            for i, res_file in enumerate(resume_files):
-                with st.spinner(f"Processing Resume {i+1}/{len(resume_files)}: {res_file.name}..."):
+            # Additional stats for explainer
+            runtime_stats["Explainer_Latency"] = []
+            
+            def process_single_resume(res_file, jd_parsed, jd_txt, jd_embeds):
+                t_res_start = time.time()
+                try:
                     res_text = extract_text_from_pdf(res_file)
+                    t_res_ocr = time.time()
+                    
                     if not res_text:
-                        st.warning(f"No text extracted from {res_file.name}.")
-                        res_parsed = {}
-                    else:
-                        extractor = ResumeAIExtractor(api_key=os.getenv("GROQ_API_KEY"))
-                        res_parsed = extractor.extract(res_text)
-                        if not res_parsed or res_parsed.get("name") == "Unknown":
-                            st.warning(f"LLM possibly failed to parse {res_file.name}. Check Groq API Key or Rate Limit.")
+                        return None, (t_res_ocr - t_res_start, 0, 0, 0, 0, time.time() - t_res_start), "No text extracted"
 
-                    score, match_breakdown = scorer.predict_score(res_parsed, st.session_state.jd_parsed)
-                    explanation = generate_explanation(res_parsed, st.session_state.jd_parsed)
-                    quality = analyze_resume_quality(res_parsed)
+                    # --- GAUNTLET 1: Early Rejection Gatekeeper ---
+                    if scorer.early_rejection_check(res_text, jd_txt):
+                        logger.info(f"Early Rejection triggered for {res_file.name}. Bypassing pipeline.")
+                        candidate_data = {
+                            "filename": res_file.name,
+                            "resume_json": {"name": "Rejected Candidate (Poor Match)"},
+                            "score": 0.05,
+                            "match_breakdown": {"Overall Score": 5.0},
+                            "explanation": {"match_reason": "Instantly rejected due to extreme lack of keyword similarity.", "missing_skills": ["Multiple Core Skills"], "strength_summary": "N/A"},
+                            "quality": {"quality_score": 0, "feedback": "Irrelevant document."},
+                            "processing_time": time.time() - t_res_start
+                        }
+                        return candidate_data, (t_res_ocr - t_res_start, 0, 0, 0, 0, candidate_data["processing_time"]), None
+                        
+                    # --- GAUNTLET 2: MD5 Pipeline Cache ---
+                    cached_data = pipeline_cache.get(res_text, jd_txt)
+                    if cached_data:
+                        # Append the filename to cached data in case it was renamed but identical
+                        cached_data["filename"] = res_file.name
+                        cached_data["processing_time"] = time.time() - t_res_start
+                        return cached_data, (0, 0, 0, 0, 0, cached_data["processing_time"]), None
+
+                    # Main Pipeline Parse
+                    extractor = ResumeAIExtractor(api_key=os.getenv("OPENAI_API_KEY"))
+                    res_parsed = extractor.extract(res_text)
+                    if not res_parsed or res_parsed.get("name") == "Unknown":
+                        logger.warning(f"LLM possibly failed to parse {res_file.name}.")
+                        
+                    t_res_llm = time.time()
+
+                    # Scoring
+                    score, match_breakdown, emb_time, xgb_time = scorer.predict_score(res_parsed, jd_parsed, jd_embeddings=jd_embeds)
+                    
+                    # --- GAUNTLET 3: Extreme Heuristic LLM Bypass ---
+                    t_exp_start = time.time()
+                    if score < 0.20:
+                        logger.info(f"LLM Reasoning Bypassed (Score < 0.20) for {res_file.name}")
+                        explanation = {"match_reason": "Heuristics classify this candidate as an extremely poor match. Skipping detailed generation.", "missing_skills": ["Many"], "strength_summary": "Lacking core requirements."}
+                        quality = {"quality_score": 3, "feedback": "Poor alignment with JD capabilities."}
+                    elif score > 0.85:
+                        logger.info(f"LLM Reasoning Bypassed (Score > 0.85) for {res_file.name}")
+                        explanation = {"match_reason": "Heuristics classify this candidate as an exceptional match.", "missing_skills": [], "strength_summary": "Strong skill overlap and deep experience alignment."}
+                        quality = {"quality_score": 9, "feedback": "Actionable, well-structured format."}
+                    else:
+                        analysis = analyze_and_explain(res_parsed, jd_parsed)
+                        explanation = {
+                            "match_reason": analysis.get("match_reason", ""),
+                            "missing_skills": analysis.get("missing_skills", []),
+                            "strength_summary": analysis.get("strength_summary", "")
+                        }
+                        quality = {
+                            "quality_score": analysis.get("quality_score", 0),
+                            "feedback": analysis.get("feedback", "")
+                        }
+                    t_exp_end = time.time()
+                    exp_time = t_exp_end - t_exp_start
 
                     candidate_data = {
                         "filename": res_file.name,
                         "resume_json": res_parsed,
                         "score": score,
-                    "match_breakdown": match_breakdown,
-                    "explanation": explanation,
-                    "quality": quality
-                }
-                candidates.append(candidate_data)
-                progress_bar.progress((i + 1) / len(resume_files))
+                        "match_breakdown": match_breakdown,
+                        "explanation": explanation,
+                        "quality": quality,
+                        "processing_time": time.time() - t_res_start,
+                        "stage_times": {
+                            "OCR": t_res_ocr - t_res_start,
+                            "LLM": t_res_llm - t_res_ocr,
+                            "Embedding": emb_time,
+                            "XGBoost": xgb_time,
+                            "Explainer": exp_time
+                        }
+                    }
+                    
+                    # Update Cache
+                    pipeline_cache.set(res_text, jd_txt, candidate_data)
+                    return candidate_data, (t_res_ocr - t_res_start, t_res_llm - t_res_ocr, emb_time, xgb_time, exp_time, candidate_data["processing_time"]), None
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Error processing {res_file.name}: {e}")
+                    logger.error(traceback.format_exc())
+                    return None, (time.time() - t_res_start, 0, 0, 0, 0, time.time() - t_res_start), f"Error: {str(e)}"
+
+            with ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 1) + 4)) as executor:
+                # Safely capture jd_parsed to avoid st.session_state thread issues
+                jd_init = st.session_state.jd_parsed
+                futures = {executor.submit(process_single_resume, res_file, jd_init, jd_text, jd_embeddings): res_file for res_file in resume_files}
                 
+                unranked = []
+                for i, future in enumerate(as_completed(futures)):
+                    candidate_data, stats, reason = future.result()
+                    if candidate_data:
+                        candidates.append(candidate_data)
+                    else:
+                        unranked.append({"filename": futures[future].name, "reason": reason or "Unknown failure"})
+                    
+                    # Unpack stats
+                    runtime_stats["OCR_Latency"].append(stats[0])
+                    runtime_stats["LLM_Inference"].append(stats[1])
+                    runtime_stats["Embedding_Generation"].append(stats[2])
+                    runtime_stats["XGBoost_Inference"].append(stats[3])
+                    runtime_stats["Explainer_Latency"].append(stats[4])
+                    runtime_stats["Total_Pipeline"].append(stats[5])
+                    
+                    progress_bar.progress((i + 1) / len(resume_files))
+            
             ranked = rank_candidates(candidates)
             st.session_state.candidates = ranked
+            st.session_state.unranked_resumes = unranked
+            st.session_state.runtime_stats = runtime_stats
+            st.session_state.total_time = time.time() - t_pipeline_start
             st.success("Processing Complete!")
+            logger.info(f"Pipeline completed. Ranked {len(ranked)} candidates.")
 
 # Dashboard
 if st.session_state.candidates and st.session_state.jd_parsed is not None:
@@ -90,15 +232,26 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
     shortlisted = sum(1 for stat in st.session_state.candidate_status.values() if stat == "Shortlisted")
     rejected = sum(1 for stat in st.session_state.candidate_status.values() if stat == "Rejected")
     unreviewed = total_cands - shortlisted - rejected
-    
-    funnel_cols[0].metric("Total Candidates", total_cands, help="Total candidates screened")
+
+    funnel_cols[0].metric("Total Ranked", total_cands, help="Ranked candidates screened")
     funnel_cols[1].metric("Shortlisted", shortlisted, help="Candidates moved forward")
     funnel_cols[2].metric("Rejected", rejected, help="Candidates dropped")
     funnel_cols[3].metric("Unreviewed", unreviewed, help="Candidates needing manual review")
+
+    st.markdown("---")
+    
+    # Show unranked resumes at the bottom
+    unranked = st.session_state.get('unranked_resumes', [])
+    if unranked:
+        with st.expander("⚠️ Unranked Resumes (Parsing/Processing Failures)", expanded=True):
+            for item in unranked:
+                st.info(f"**{item['filename']}** – {item['reason']}")
     
     st.markdown("---")
     
     with st.sidebar:
+        if "total_time" in st.session_state:
+            st.sidebar.caption(f"&#9202; Total Efficiency: {st.session_state.total_time:.2f}s")
         st.markdown("---")
         st.header("Screening Filters")
         min_score = st.slider("Minimum Match Score", 0.0, 1.0, 0.0, 0.05)
