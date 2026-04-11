@@ -9,9 +9,11 @@ RecruitIQ is a production-grade, context-aware resume screening and ranking engi
 ### **🎯 Objectives & Key Features**
 *   **Semantic Comprehension**: Bridges the gap between variable terminology (e.g., "GCP" vs "Google Cloud Platform") using dense vector embeddings.
 *   **Contextual Feature Engineering**: Generates 50 proprietary features measuring technical complexity, leadership density, and career velocity.
-*   **List-wise Ranking (LambdaMART)**: Utilizes a LightGBM ranker optimized for NDCG (Normalized Discounted Cumulative Gain) to ensure the most relevant candidates appear at the top.
-*   **Qualitative Reasoning Layer**: A subordinate LLM layer provided evidence-based strengths, weaknesses, and hiring recommendations for Top-N candidates.
-*   **OCR-to-Insights Pipeline**: handles highly-styled, image-heavy, and non-selectable PDF resumes with robust Tesseract integration.
+*   **List-wise Ranking (LambdaMART)**: Utilizes a LightGBM ranker optimized for NDCG (Normalized Discounted Cumulative Gain).
+*   **Premium Recruiter Experience**: A high-fidelity, dark-mode dashboard featuring glassmorphism, interactive candidate cards, and real-time status tracking.
+*   **High-Performance Pipeline**: Implements multi-threaded processing and MD5-based persistence caching to ensure sub-second response times for batch uploads.
+*   **Qualitative Reasoning Layer**: A subordinate LLM layer provides evidence-based strengths, weaknesses, and hiring recommendations for Top-N candidates.
+*   **Automated Outreach**: One-click generation of personalized recruiter emails based on candidate strengths and JD alignment.
 
 ---
 
@@ -43,9 +45,17 @@ graph TD
     end
 
     subgraph Explainability_Layer [Reasoning Package]
-        AI[explainability/explainer.py] --> GPT[GPT-4o-mini]
+        AI[explainability/explainer.py] --> GPT[GPT-4o]
+        AI --> Outreach[Outreach Drafts]
     end
 
+    subgraph Optimization_Layer [Efficiency Engine]
+        Thread[Concurrent Execution] --> Multi[ThreadPoolExecutor]
+        Cache[Pipeline Cache] --> Persistence[MD5 Hash Mapping]
+    end
+
+    Main --> Optimization_Layer
+    Optimization_Layer --> Data_Extraction
     Main --> Scorer
     Scorer --> Engineer
     Engineer --> Predictor
@@ -68,14 +78,18 @@ flowchart LR
         UC2(Apply Hard Filters)
         UC3(View Ranked Leaderboard)
         UC4(Review AI Reasoning)
-        UC5(Shortlist Candidates)
+        UC5(Shortlist/Reject Candidates)
         UC6(Tune ML Hyperparameters)
+        UC7(Draft Outreach Emails)
+        UC8(Export Analytics to CSV)
     end
 
     Recruiter --> UC1
     Recruiter --> UC3
     Recruiter --> UC4
     Recruiter --> UC5
+    Recruiter --> UC7
+    Recruiter --> UC8
 
     Admin --> UC2
     Admin --> UC6
@@ -85,55 +99,68 @@ flowchart LR
 ```mermaid
 stateDiagram-v2
     [*] --> Ingestion: Upload PDF
-    Ingestion --> OCR: pyTesseract / PDFPlumber
-    OCR --> Extraction: LLM JSON Parsing
-    Extraction --> Gating: Hard Filtering Logic
+    Ingestion --> CacheCheck: MD5 Persistence Mapping
+    
+    CacheCheck --> Dashboard: CACHE HIT (Zero-Latency)
+    CacheCheck --> OCR: CACHE MISS
+    
+    OCR --> Extraction: Multi-threaded Parallelization
+    Extraction --> Gating: Hard Filtering Logic (Early Rejection)
     
     state Gating {
-        [*] --> SkillGate
+        [*] --> KeywordGate
+        KeywordGate --> SkillGate
         SkillGate --> ExperienceGate
-        ExperienceGate --> DegreeGate
     }
     
     Gating --> FeatureGen: PASS
-    Gating --> Rejected: FAIL
+    Gating --> Rejected: FAIL (Instant)
     
     FeatureGen --> ML_Rank: LightGBM Inference
     ML_Rank --> TopN_Check: Pass 1
     
     state TopN_Check {
         [*] --> Is_Top20?
-        Is_Top20? --> LLM_Analysis: YES
-        Is_Top20? --> Generic_Data: NO
+        Is_Top20? --> LLM_Reasoning: YES (Pass 2)
+        Is_Top20? --> Structural_Data: NO
     }
     
-    LLM_Analysis --> Dashboard
-    Generic_Data --> Dashboard
-    Dashboard --> [*]
+    LLM_Reasoning --> Dashboard
+    Structural_Data --> Dashboard
+    Dashboard --> Outreach: Optional Action
+    Outreach --> [*]
 ```
 
 ### **3. Sequence Diagram (2-Pass Ranking Workflow)**
 ```mermaid
 sequenceDiagram
     participant UI as Streamlit UI
+    participant Cache as Pipeline Cache
     participant FE as Feature Engineer
     participant ML as ML Ranker
-    participant AI as LLM Explainer
+    participant AI as LLM Explainer / Outreach
 
-    UI->>FE: Raw JSON (Resume + JD)
-    FE-->>UI: 50-Feature Vector
-    UI->>ML: Inference Request
-    ML-->>UI: Baseline Scores (NDCG)
-    UI->>UI: Sort & Slice Top 20
-    
-    loop For Each Top Candidate
-        UI->>AI: analyze_and_explain()
-        AI->>AI: Invoke GPT Model
-        AI-->>UI: {ats_score, reasoning, strengths}
+    UI->>Cache: check(MD5_Hash)
+    alt Cache Hit
+        Cache-->>UI: Return Cached Result
+    else Cache Miss
+        UI->>FE: Raw JSON (Resume + JD)
+        FE-->>UI: 50-Feature Vector
+        UI->>ML: Inference Request
+        ML-->>UI: Baseline Scores (NDCG)
+        UI->>UI: Sort & Slice Top 20
+        
+        loop For Each Top Candidate
+            UI->>AI: analyze_and_explain()
+            AI->>AI: Invoke GPT-4o Model
+            AI-->>UI: {ats_score, reasoning, strengths}
+        end
     end
     
-    UI->>UI: Compute Final Weighted Score
-    UI-->>UI: Render Waterfall Charts
+    UI->>UI: Render Metrics & Box UI
+    Note right of UI: User clicks "Draft Outreach"
+    UI->>AI: generate_outreach_email()
+    AI-->>UI: Personalized Draft
 ```
 
 ### **4. Class Diagram**
@@ -203,9 +230,11 @@ classDiagram
     ```
 2.  **Operational Workflow**:
     *   **Sidebar**: Upload the Job Description PDF first.
-    *   **Sidebar**: Batch-upload candidate resumes (Up to 50 recommended for optimal LLM latency).
+    *   **Sidebar**: Batch-upload candidate resumes (Up to 100+ supported via concurrent processing).
     *   **Action**: Click "Process & Rank Candidates".
     *   **Review**: Inspect the "Key Recruiter Signals" grid for each candidate and the "Match Explanation" card.
+    *   **Engage**: Use the "Draft Outreach" button to generate AI-tailored messages instantly.
+    *   **Export**: Use the "Export Data" button to pull all candidate contact details into an Excel-ready CSV format.
 
 ---
 

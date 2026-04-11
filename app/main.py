@@ -18,12 +18,93 @@ from explainability.explainer import analyze_and_explain, generate_outreach_emai
 from utils.logging_config import setup_logging
 from utils.cache_manager import pipeline_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from streamlit_extras.stylable_container import stylable_container
 
 # Initialize logging
 logger = setup_logging(__name__)
 logger.info("RecruitIQ Application Started")
 
 st.set_page_config(page_title="RecruitIQ", layout="wide")
+
+# --- Premium Custom CSS ---
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+    
+    html, body, [class*="css"]  {
+        font-family: 'Outfit', sans-serif;
+        background-color: #0f172a;
+        color: #f8fafc;
+    }
+    
+    h1, h2, h3, h4 {
+        color: #f1f5f9 !important;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+    }
+
+    /* Metric Enhancements */
+    div[data-testid="stMetricValue"] {
+        font-size: 2.2rem;
+        background: linear-gradient(135deg, #a5b4fc 0%, #6366f1 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 700;
+        text-shadow: 0 2px 10px rgba(99, 102, 241, 0.2);
+    }
+    
+    /* Expander Styling */
+    .stExpander {
+        background: rgba(30, 41, 59, 0.4) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        margin-bottom: 10px !important;
+        transition: all 0.3s ease;
+    }
+    .stExpander:hover {
+        border-color: rgba(99, 102, 241, 0.4) !important;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Button Styling */
+    .stButton > button {
+        border-radius: 8px !important;
+        transition: all 0.3s ease !important;
+    }
+    .stButton > button:hover {
+        transform: scale(1.05);
+        box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+    }
+    
+    /* Horizontal Rule */
+    hr {
+        margin-top: 1rem;
+        margin-bottom: 1rem;
+        border: 0;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    /* ----------- EXPLANATION BOXES ----------- */
+    .box {
+        background: rgba(30, 41, 59, 0.4) !important;
+        border-radius: 12px !important;
+        padding: 16px !important;
+        margin-bottom: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        transition: all 0.3s ease;
+    }
+    .box:hover {
+        background: rgba(30, 41, 59, 0.6) !important;
+        border-color: rgba(99, 102, 241, 0.2) !important;
+    }
+    
+    /* Box Accents based on container keys */
+    div[key^="explain_"] .box { border-left: 4px solid #6366f1 !important; }
+    div[key^="strength_"] .box { border-left: 4px solid #22c55e !important; }
+    div[key^="weakness_"] .box { border-left: 4px solid #ef4444 !important; }
+</style>
+""", unsafe_allow_html=True)
 
 st.title("RecruitIQ: AI-Powered Resume Screening")
 
@@ -246,27 +327,38 @@ with st.sidebar:
 
 # Dashboard
 if st.session_state.candidates and st.session_state.jd_parsed is not None:
-    funnel_cols = st.columns(4)
-    total_cands = len(st.session_state.candidates)
-    shortlisted = sum(1 for stat in st.session_state.candidate_status.values() if stat == "Shortlisted")
-    rejected = sum(1 for stat in st.session_state.candidate_status.values() if stat == "Rejected")
-    unreviewed = total_cands - shortlisted - rejected
+    with stylable_container(
+        key="metrics_funnel",
+        css_styles="""
+            {
+                background: rgba(30, 41, 59, 0.3);
+                padding: 20px;
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.05);
+                margin-bottom: 20px;
+            }
+        """
+    ):
+        funnel_cols = st.columns(4)
+        total_cands = len(st.session_state.candidates)
+        shortlisted = sum(1 for stat in st.session_state.candidate_status.values() if stat == "Shortlisted")
+        rejected = sum(1 for stat in st.session_state.candidate_status.values() if stat == "Rejected")
+        unreviewed = total_cands - shortlisted - rejected
 
-    funnel_cols[0].metric("Total Ranked", total_cands, help="Ranked candidates screened")
-    funnel_cols[1].metric("Shortlisted", shortlisted, help="Candidates moved forward")
-    funnel_cols[2].metric("Rejected", rejected, help="Candidates dropped")
-    funnel_cols[3].metric("Unreviewed", unreviewed, help="Candidates needing manual review")
+        funnel_cols[0].metric("Total Ranked", total_cands, help="Ranked candidates screened")
+        funnel_cols[1].metric("Shortlisted", shortlisted, help="Candidates moved forward")
+        funnel_cols[2].metric("Rejected", rejected, help="Candidates dropped")
+        funnel_cols[3].metric("Unreviewed", unreviewed, help="Candidates needing manual review")
 
-    st.markdown("---")
-    
-    # Show unranked resumes at the bottom
+    # Show unranked resumes if any
     unranked = st.session_state.get('unranked_resumes', [])
     if unranked:
         with st.expander("⚠️ Unranked Resumes (Parsing/Processing Failures)", expanded=True):
             for item in unranked:
                 st.info(f"**{item['filename']}** – {item['reason']}")
-    
-    st.markdown("---")
+        st.markdown("---")
+    else:
+        st.markdown("---")
     
     with st.sidebar:
         if "total_time" in st.session_state:
@@ -347,142 +439,159 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
         else:
             exp_title = f"{display_rank}. {candidate_name} | Match: {score:.2f}"
             
-        with st.expander(exp_title):
-            c_email = cand['resume_json'].get('email', 'N/A')
-            c_phone = cand['resume_json'].get('phone', 'N/A')
-            
-            st.markdown(f"**Name:** {candidate_name} &nbsp;&nbsp;|&nbsp;&nbsp; **Rank:** {display_rank} &nbsp;&nbsp;|&nbsp;&nbsp; **Score:** {score:.2f}")
-            st.markdown(f"**Email:** {c_email} &nbsp;&nbsp;|&nbsp;&nbsp; **Phone:** {c_phone}")
-            
-            btn_cols = st.columns([1, 1, 2, 2])
-            if btn_cols[0].button("Shortlist", key=f"sl_{cand['filename']}", help="Mark candidate as shortlisted"):
-                st.session_state.candidate_status[cand['filename']] = "Shortlisted"
-                st.rerun()
-            if btn_cols[1].button("Reject", key=f"rj_{cand['filename']}", help="Mark candidate as rejected"):
-                st.session_state.candidate_status[cand['filename']] = "Rejected"
-                st.rerun()
-            
-            if btn_cols[2].button("✉️ Draft Outreach", key=f"outreach_{cand['filename']}", help="Generate personalized outreach email"):
-                with st.spinner("Drafting personalized email..."):
-                    email_draft = generate_outreach_email(cand['resume_json'], st.session_state.jd_parsed, cand.get('explanation'))
-                    st.session_state[f"draft_{cand['filename']}"] = email_draft
-                    
-            if f"draft_{cand['filename']}" in st.session_state:
-                st.info("✉️ **Generated Outreach Draft:**")
-                st.text_area("Copy Text", st.session_state[f"draft_{cand['filename']}"], height=200, key=f"ta_{cand['filename']}")
+        with st.container(key=f"card_{cand['filename']}"):
+            with st.expander(exp_title):
+                c_email = cand['resume_json'].get('email', 'N/A')
+                c_phone = cand['resume_json'].get('phone', 'N/A')
                 
-
-            st.markdown("---")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.markdown("**Key Skills:**")
-                skills = cand['resume_json'].get('skills', [])
-                st.write(", ".join(skills[:10]) if isinstance(skills, list) else "N/A")
-            with c2:
-                st.markdown("**Missing Skills:**")
-                missing = cand['explanation'].get('missing_skills', [])
-                st.write(", ".join(missing) if isinstance(missing, list) else "None identified")
-            with c3:
-                st.markdown("**Resume Quality Score:**")
-                st.write(f"{cand['quality'].get('quality_score', 'N/A')}/10")
+                st.markdown(f"**Name:** {candidate_name} &nbsp;&nbsp;|&nbsp;&nbsp; **Rank:** {display_rank} &nbsp;&nbsp;|&nbsp;&nbsp; **Score:** {score:.2f}")
+                st.markdown(f"**Email:** {c_email} &nbsp;&nbsp;|&nbsp;&nbsp; **Phone:** {c_phone}")
                 
-            st.markdown("---")
-            st.markdown("**Match Explanation (LLM):**")
-            st.write(cand['explanation'].get('match_reason', ''))
-            
-            st.markdown("**Strength Summary:**")
-            st.write(cand['explanation'].get('strength_summary', ''))
-            
-            st.markdown("---")
-            st.markdown("**Match Breakdown (Key Recruiter Signals):**")
-            breakdown = cand['match_breakdown']
-            if breakdown and "rejection_reasons" in breakdown:
-                st.markdown(f"**Rejection Reasons:** {', '.join(breakdown['rejection_reasons'])}")
-                 # Show only high-signal metrics for decision making
-            b_col1, b_col2, b_col3 = st.columns(3)
-            b_col1.metric("Core Skill Coverage", f"{breakdown.get('core_skill_coverage', 0):.2f}", help="Percentage of MUST-HAVE skills identified.")
-            b_col2.metric("Experience Match", f"{breakdown.get('experience_years_score', 0):.2f}", help="Alignment with required tenure.")
-            b_col3.metric("Semantic Relevance", f"{breakdown.get('resume_jd_embedding_score', 0):.2f}", help="Deep contextual overlap between JD and Resume.")
-            
-            b_col4, b_col5, b_col6 = st.columns(3)
-            b_col4.metric("Impact Score", f"{breakdown.get('impact_score', 0):.2f}", help="Frequency of measurable results (%, $, scaling).")
-            b_col5.metric("Career Progression", f"{breakdown.get('role_progression_score', 0):.2f}", help="Trajectory of seniority and growth.")
-            b_col6.metric("Job Stability", f"{breakdown.get('job_stability_score', 0):.2f}", help="Consistency of tenure across past roles.")
-
-            b_col7, b_col8, b_col9 = st.columns(3)
-            b_col7.metric("Tech Complexity", f"{breakdown.get('responsibility_complexity_score', 0):.2f}", help="Depth and density of technical responsibilities.")
-            b_col8.metric("Leadership Signal", f"{breakdown.get('leadership_experience_score', 0):.2f}", help="Mentorship, ownership, and management keywords.")
-            b_col9.metric("Education Match", f"{breakdown.get('education_match_score', 0):.2f}", help="Alignment with required degree and field.")
-            
-            st.markdown("---")
-
-            st.markdown("**Extracted Resume Data Details:**")
-            res_data = cand['resume_json']
-            
-            def clean_list_str(val):
-                if isinstance(val, list):
-                    return val
-                if isinstance(val, str) and val.strip().startswith('['):
-                    import ast
-                    try:
-                        parsed = ast.literal_eval(val)
-                        if isinstance(parsed, list):
-                            return parsed
-                    except:
-                        cleaned = val.replace('[', '').replace(']', '').replace("'", "").replace('"', "")
-                        return [s.strip() for s in cleaned.split(',') if s.strip()]
-                return val
+                btn_cols = st.columns([1, 1, 2, 2])
+                if btn_cols[0].button("Shortlist", key=f"sl_{cand['filename']}", help="Mark candidate as shortlisted"):
+                    st.session_state.candidate_status[cand['filename']] = "Shortlisted"
+                    st.rerun()
+                if btn_cols[1].button("Reject", key=f"rj_{cand['filename']}", help="Mark candidate as rejected"):
+                    st.session_state.candidate_status[cand['filename']] = "Rejected"
+                    st.rerun()
                 
-            groups = {
-                "Contact Info": ["email", "phone", "address", "online_links"],
-                "Objective": ["career_objective"],
-                "Skills & Languages": ["skills", "related_skils_in_job", "languages", "proficiency_levels"],
-                "Experience": ["professional_company_names", "company_urls", "positions", "role_positions", "start_dates", "end_dates", "locations", "responsibilities", "experience_years", "projects_count"],
-                "Education": ["educational_institution_name", "degree_names", "major_field_of_studies", "passing_years", "educational_results", "result_types"],
-                "Certifications": ["certification_providers", "certification_skills", "issue_dates", "expiry_dates"],
-                "Extra Curricular": ["extra_curricular_activity_types", "extra_curricular_organization_names", "extra_curricular_organization_links"]
-            }
-            
-            processed_keys = set(["name"])
-            
-            for group_name, keys in groups.items():
-                group_data = {}
-                for k in keys:
-                    val = res_data.get(k)
-                    if val not in [None, "", [], {}, "N/A", "Unknown", "[]", "['']"]:
-                        group_data[k] = clean_list_str(val)
-                        processed_keys.add(k)
-                
-                if group_data:
-                    st.markdown(f"#### :gray[{group_name}]")
-                    for key, value in group_data.items():
-                        clean_key = key.replace('_', ' ').title()
+                if btn_cols[2].button("✉️ Draft Outreach", key=f"outreach_{cand['filename']}", help="Generate personalized outreach email"):
+                    with st.spinner("Drafting personalized email..."):
+                        email_draft = generate_outreach_email(cand['resume_json'], st.session_state.jd_parsed, cand.get('explanation'))
+                        st.session_state[f"draft_{cand['filename']}"] = email_draft
                         
-                        if isinstance(value, list):
-                            if len(value) > 0 and isinstance(value[0], str) and len(value[0]) > 60:
+                if f"draft_{cand['filename']}" in st.session_state:
+                    st.info("✉️ **Generated Outreach Draft:**")
+                    st.text_area("Copy Text", st.session_state[f"draft_{cand['filename']}"], height=200, key=f"ta_{cand['filename']}")
+                    
+                st.markdown("---")
+                
+                c1, c2 = st.columns([2, 1])
+                with c1:
+                    st.markdown("**Key Skills Found:**")
+                    skills = cand['resume_json'].get('skills', [])
+                    st.write(", ".join(skills[:12]) if isinstance(skills, list) else "N/A")
+                with c2:
+                    st.markdown("**Resume Quality:**")
+                    st.write(f"Score: **{cand['quality'].get('quality_score', 'N/A')}/10**")
+                    st.caption(f"Signal: {cand['quality'].get('feedback', 'Calculated')}")
+                    
+                st.markdown("---")
+                
+                with st.container(key=f"explain_{cand['filename']}"):
+                    st.markdown(f"""
+                    <div class="box">
+                        <b>Match Explanation:</b><br>
+                        {cand['explanation'].get('match_reason', '')}
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with st.container(key=f"strength_{cand['filename']}"):
+                    st.markdown(f"""
+                    <div class="box">
+                        <b>Strengths:</b><br>
+                        {cand['explanation'].get('strength_summary', '')}
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                with st.container(key=f"weakness_{cand['filename']}"):
+                    st.markdown(f"""
+                    <div class="box">
+                        <b>Missing Skills / Gaps:</b><br>
+                        {", ".join(cand['explanation'].get('missing_skills', []))}
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                st.markdown("---")
+                st.markdown("**Match Breakdown (Key Recruiter Signals):**")
+                breakdown = cand['match_breakdown']
+                if breakdown and "rejection_reasons" in breakdown:
+                    st.markdown(f"**Rejection Reasons:** {', '.join(breakdown['rejection_reasons'])}")
+                     # Show only high-signal metrics for decision making
+                b_col1, b_col2, b_col3 = st.columns(3)
+                b_col1.metric("Core Skill Coverage", f"{breakdown.get('core_skill_coverage', 0):.2f}", help="Percentage of MUST-HAVE skills identified.")
+                b_col2.metric("Experience Match", f"{breakdown.get('experience_years_score', 0):.2f}", help="Alignment with required tenure.")
+                b_col3.metric("Semantic Relevance", f"{breakdown.get('resume_jd_embedding_score', 0):.2f}", help="Deep contextual overlap between JD and Resume.")
+                
+                b_col4, b_col5, b_col6 = st.columns(3)
+                b_col4.metric("Impact Score", f"{breakdown.get('impact_score', 0):.2f}", help="Frequency of measurable results (%, $, scaling).")
+                b_col5.metric("Career Progression", f"{breakdown.get('role_progression_score', 0):.2f}", help="Trajectory of seniority and growth.")
+                b_col6.metric("Job Stability", f"{breakdown.get('job_stability_score', 0):.2f}", help="Consistency of tenure across past roles.")
+    
+                b_col7, b_col8, b_col9 = st.columns(3)
+                b_col7.metric("Tech Complexity", f"{breakdown.get('responsibility_complexity_score', 0):.2f}", help="Depth and density of technical responsibilities.")
+                b_col8.metric("Leadership Signal", f"{breakdown.get('leadership_experience_score', 0):.2f}", help="Mentorship, ownership, and management keywords.")
+                b_col9.metric("Education Match", f"{breakdown.get('education_match_score', 0):.2f}", help="Alignment with required degree and field.")
+                
+                st.markdown("---")
+    
+                st.markdown("**Extracted Resume Data Details:**")
+                res_data = cand['resume_json']
+                
+                def clean_list_str(val):
+                    if isinstance(val, list):
+                        return val
+                    if isinstance(val, str) and val.strip().startswith('['):
+                        import ast
+                        try:
+                            parsed = ast.literal_eval(val)
+                            if isinstance(parsed, list):
+                                return parsed
+                        except:
+                            cleaned = val.replace('[', '').replace(']', '').replace("'", "").replace('"', "")
+                            return [s.strip() for s in cleaned.split(',') if s.strip()]
+                    return val
+                    
+                groups = {
+                    "Contact Info": ["email", "phone", "address", "online_links"],
+                    "Objective": ["career_objective"],
+                    "Skills & Languages": ["skills", "related_skils_in_job", "languages", "proficiency_levels"],
+                    "Experience": ["professional_company_names", "company_urls", "positions", "role_positions", "start_dates", "end_dates", "locations", "responsibilities", "experience_years", "projects_count"],
+                    "Education": ["educational_institution_name", "degree_names", "major_field_of_studies", "passing_years", "educational_results", "result_types"],
+                    "Certifications": ["certification_providers", "certification_skills", "issue_dates", "expiry_dates"],
+                    "Extra Curricular": ["extra_curricular_activity_types", "extra_curricular_organization_names", "extra_curricular_organization_links"]
+                }
+                
+                processed_keys = set(["name"])
+                
+                for group_name, keys in groups.items():
+                    group_data = {}
+                    for k in keys:
+                        val = res_data.get(k)
+                        if val not in [None, "", [], {}, "N/A", "Unknown", "[]", "['']"]:
+                            group_data[k] = clean_list_str(val)
+                            processed_keys.add(k)
+                    
+                    if group_data:
+                        st.markdown(f"#### :gray[{group_name}]")
+                        for key, value in group_data.items():
+                            clean_key = key.replace('_', ' ').title()
+                            
+                            if isinstance(value, list):
+                                if len(value) > 0 and isinstance(value[0], str) and len(value[0]) > 60:
+                                    st.markdown(f":blue[**{clean_key}:**]")
+                                    for item in value:
+                                        st.markdown(f"- {item}")
+                                else:
+                                    st.markdown(f":blue[**{clean_key}:**] {', '.join(map(str, value))}")
+                            elif isinstance(value, dict):
                                 st.markdown(f":blue[**{clean_key}:**]")
-                                for item in value:
-                                    st.markdown(f"- {item}")
+                                st.json(value)
                             else:
-                                st.markdown(f":blue[**{clean_key}:**] {', '.join(map(str, value))}")
+                                st.markdown(f":blue[**{clean_key}:**] {value}")
+                                
+                # Render unmapped extracted fields
+                for key, value in res_data.items():
+                    if key not in processed_keys and value not in [None, "", [], {}, "N/A", "Unknown", "[]", "['']"]:
+                        val = clean_list_str(value)
+                        clean_key = key.replace('_', ' ').title()
+                        if isinstance(val, list):
+                            st.markdown(f":blue[**{clean_key}:**] {', '.join(map(str, val))}")
                         elif isinstance(value, dict):
                             st.markdown(f":blue[**{clean_key}:**]")
                             st.json(value)
                         else:
-                            st.markdown(f":blue[**{clean_key}:**] {value}")
-                            
-            # Render unmapped extracted fields
-            for key, value in res_data.items():
-                if key not in processed_keys and value not in [None, "", [], {}, "N/A", "Unknown", "[]", "['']"]:
-                    val = clean_list_str(value)
-                    clean_key = key.replace('_', ' ').title()
-                    if isinstance(val, list):
-                        st.markdown(f":blue[**{clean_key}:**] {', '.join(map(str, val))}")
-                    elif isinstance(value, dict):
-                        st.markdown(f":blue[**{clean_key}:**]")
-                        st.json(value)
-                    else:
-                        st.markdown(f":blue[**{clean_key}:**] {val}")
+                            st.markdown(f":blue[**{clean_key}:**] {val}")
             
 
 elif not st.session_state.candidates:
