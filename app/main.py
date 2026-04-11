@@ -14,7 +14,7 @@ from parser.llm_parser import parse_job_description
 from resume_parser.ai_extractor import ResumeAIExtractor
 from model.predict import ResumeScorerModel
 from ranking.scorer import rank_candidates, filter_candidates
-from explainability.explainer import analyze_and_explain
+from explainability.explainer import analyze_and_explain, generate_outreach_email
 from utils.logging_config import setup_logging
 from utils.cache_manager import pipeline_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -129,9 +129,12 @@ with st.sidebar:
                     cached_data = pipeline_cache.get(res_text, jd_txt)
                     if cached_data:
                         # Append the filename to cached data in case it was renamed but identical
+                        import copy
+                        cached_data = copy.deepcopy(cached_data)
                         cached_data["filename"] = res_file.name
                         cached_data["processing_time"] = time.time() - t_res_start
                         return cached_data, (0, 0, 0, 0, 0, cached_data["processing_time"]), None
+
 
                     # Main Pipeline Parse
                     extractor = ResumeAIExtractor(api_key=os.getenv("OPENAI_API_KEY"))
@@ -154,6 +157,7 @@ with st.sidebar:
                     candidate_data = {
                         "filename": res_file.name,
                         "resume_json": res_parsed,
+                        "raw_score": score,
                         "score": score,
                         "match_breakdown": match_breakdown,
                         "explanation": explanation,
@@ -225,8 +229,11 @@ with st.sidebar:
                             
                             ats_score = analysis.get("ats_score", 0.0)
                             
+                            # Determine base score (ensure we aren't adding bonus to an already-bonused cached score)
+                            base_score = cand.get("raw_score", cand["score"])
+                            
                             # Integrate LLM layer back into final score (15% weight)
-                            cand["score"] = min(1.0, cand["score"] + (0.15 * float(ats_score)))
+                            cand["score"] = min(1.0, base_score + (0.15 * float(ats_score)))
                             
             # Re-rank after applying final ATS modifiers
             ranked = rank_candidates(ranked)
@@ -347,14 +354,24 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
             st.markdown(f"**Name:** {candidate_name} &nbsp;&nbsp;|&nbsp;&nbsp; **Rank:** {display_rank} &nbsp;&nbsp;|&nbsp;&nbsp; **Score:** {score:.2f}")
             st.markdown(f"**Email:** {c_email} &nbsp;&nbsp;|&nbsp;&nbsp; **Phone:** {c_phone}")
             
-            btn_cols = st.columns([1, 1, 4])
+            btn_cols = st.columns([1, 1, 2, 2])
             if btn_cols[0].button("Shortlist", key=f"sl_{cand['filename']}", help="Mark candidate as shortlisted"):
                 st.session_state.candidate_status[cand['filename']] = "Shortlisted"
                 st.rerun()
             if btn_cols[1].button("Reject", key=f"rj_{cand['filename']}", help="Mark candidate as rejected"):
                 st.session_state.candidate_status[cand['filename']] = "Rejected"
                 st.rerun()
+            
+            if btn_cols[2].button("✉️ Draft Outreach", key=f"outreach_{cand['filename']}", help="Generate personalized outreach email"):
+                with st.spinner("Drafting personalized email..."):
+                    email_draft = generate_outreach_email(cand['resume_json'], st.session_state.jd_parsed, cand.get('explanation'))
+                    st.session_state[f"draft_{cand['filename']}"] = email_draft
+                    
+            if f"draft_{cand['filename']}" in st.session_state:
+                st.info("✉️ **Generated Outreach Draft:**")
+                st.text_area("Copy Text", st.session_state[f"draft_{cand['filename']}"], height=200, key=f"ta_{cand['filename']}")
                 
+
             st.markdown("---")
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -381,8 +398,7 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
             breakdown = cand['match_breakdown']
             if breakdown and "rejection_reasons" in breakdown:
                 st.markdown(f"**Rejection Reasons:** {', '.join(breakdown['rejection_reasons'])}")
-            
-            # Show only high-signal metrics for decision making
+                 # Show only high-signal metrics for decision making
             b_col1, b_col2, b_col3 = st.columns(3)
             b_col1.metric("Core Skill Coverage", f"{breakdown.get('core_skill_coverage', 0):.2f}", help="Percentage of MUST-HAVE skills identified.")
             b_col2.metric("Experience Match", f"{breakdown.get('experience_years_score', 0):.2f}", help="Alignment with required tenure.")
@@ -399,6 +415,7 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
             b_col9.metric("Education Match", f"{breakdown.get('education_match_score', 0):.2f}", help="Alignment with required degree and field.")
             
             st.markdown("---")
+
             st.markdown("**Extracted Resume Data Details:**")
             res_data = cand['resume_json']
             

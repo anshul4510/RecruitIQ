@@ -73,3 +73,76 @@ def analyze_and_explain(resume_json, jd_json):
             "recommendation": "Consider",
             "reasoning": "Failed to analyze."
         }
+
+def generate_outreach_email(resume_json, jd_json, explanation=None):
+    """
+    Generates a personalized outreach email for the candidate based on their resume and the JD.
+    """
+    if not llm:
+        return "LLM not configured. Please add OPENAI_API_KEY to .env."
+
+    try:
+        # Create a less strict version of the LLM for plain text generation
+        email_llm = ChatOpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            model="gpt-4o-mini", 
+            temperature=0.7
+        )
+
+        prompt_template = """
+        You are a technical recruiter reaching out to a candidate who looks like a great fit for your open role.
+        
+        Write a professional, personalized outreach email to this candidate.
+        
+        Guidelines:
+        1. Keep it under 150 words. Be concise and respectful of their time.
+        2. Specifically mention 1 or 2 impressive things from THEIR resume (a specific company they worked at, an impressive project, or a rare skill).
+        3. Explain briefly why that specific background makes them a great fit for YOUR Job Description.
+        4. End with a low-friction Call to Action (CTA) asking for a brief chat.
+        5. Do not invent details. Use only the provided information.
+        6. Return ONLY the email text. Do not include placeholders like "[Your Name]". Use generic sign-offs instead.
+        
+        Candidate Name: {name}
+        
+        Candidate Resume Highlight:
+        {resume}
+        
+        Job Description Highlight:
+        {jd}
+        
+        Explanation context (optional context on why they matched):
+        {explanation_text}
+        """
+        
+        prompt = PromptTemplate(input_variables=["name", "resume", "jd", "explanation_text"], template=prompt_template)
+        chain = prompt | email_llm
+        
+        # We only need the summary of resume/jd to save tokens and keep it focused
+        res_summary = {
+            "skills": resume_json.get("skills", [])[:10],
+            "experience": resume_json.get("positions", [])[:2],
+            "companies": resume_json.get("professional_company_names", [])[:2]
+        }
+        
+        jd_summary = {
+            "title": jd_json.get("job_position_name", "Open Role"),
+            "core_skills": jd_json.get("skills_required", [])[:5]
+        }
+        
+        exp_text = explanation.get("reasoning", "") if explanation else ""
+        c_name = resume_json.get("name", "Candidate")
+        if c_name.lower() == "unknown":
+            c_name = "Candidate"
+        
+        response = chain.invoke({
+            "name": c_name,
+            "resume": json.dumps(res_summary), 
+            "jd": json.dumps(jd_summary),
+            "explanation_text": exp_text
+        })
+        
+        return response.content.strip()
+    except Exception as e:
+        print(f"Error generating email: {e}")
+        return "Failed to generate outreach email. Please try again later."
+
