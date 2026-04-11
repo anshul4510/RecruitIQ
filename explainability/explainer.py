@@ -1,11 +1,9 @@
 import os
 import json
 from dotenv import load_dotenv
-# from langchain_groq import ChatGroq
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
-# Load environment variables
 load_dotenv()
 
 try:
@@ -21,29 +19,35 @@ except Exception as e:
 
 def analyze_and_explain(resume_json, jd_json):
     """
-    Returns an explanation of why the candidate is a good match, 
-    missing skills, strength summary, quality score, and feedback in a single LLM call.
+    Returns an expert explanation of a top candidate's match quality.
     """
     if not llm:
         return {
-            "match_reason": "LLM not configured. Please add OPENAI_API_KEY to .env.",
-            "missing_skills": [],
-            "strength_summary": "LLM not configured.",
-            "quality_score": 0,
-            "feedback": "LLM not configured."
+            "ats_score": 0.5,
+            "strengths": ["LLM unconfigured"],
+            "weaknesses": ["LLM unconfigured"],
+            "recommendation": "Consider",
+            "reasoning": "LLM not configured. Please add OPENAI_API_KEY to .env."
         }
 
     prompt_template = """
-    You are an expert HR recruiter. Compare the candidate's resume with the job description.
-    Also analyze the overall quality of this parsed resume based on completeness, impact, and structure.
+    You are an expert technical recruiter evaluating a candidate for a specific role.
+    Your evaluation must prioritize:
+    - Relevance of experience over total years
+    - Demonstrated impact over listed responsibilities
+    - Career progression and growth trajectory
+    - Contextual skill use over keyword presence
+
+    Be concise, specific, and evidence-based. Do not reward verbosity.
+    Penalize vague claims without measurable outcomes.
     
-    Provide ONLY a JSON object with the exact following keys:
+    Provide ONLY a JSON object with the exact following schema:
     {{
-        "match_reason": "A brief explanation of why this candidate is a good fit.",
-        "missing_skills": ["List", "of", "missing", "skills required by JD"],
-        "strength_summary": "A 1-2 sentence summary of the candidate's core strengths.",
-        "quality_score": 8, # Integer from 1 to 10
-        "feedback": "1-2 sentences on how to improve the resume format/content."
+      "ats_score": 0.85, 
+      "strengths": ["string", "string"], 
+      "weaknesses": ["string"], 
+      "recommendation": "Strong Hire | Consider | Reject", 
+      "reasoning": "2-3 sentence evidence-based justification."
     }}
     
     Candidate Resume:
@@ -58,13 +62,14 @@ def analyze_and_explain(resume_json, jd_json):
     try:
         response = chain.invoke({"resume": json.dumps(resume_json), "jd": json.dumps(jd_json)})
         content = response.content.strip()
-        return json.loads(content)
+        parsed = json.loads(content)
+        return parsed
     except Exception as e:
-        print(f"Error generating explanation and quality: {e}")
+        print(f"Error generating explanation: {e}")
         return {
-            "match_reason": "Failed to generate explanation.",
-            "missing_skills": [],
-            "strength_summary": "Failed to generate explanation.",
-            "quality_score": 0,
-            "feedback": "Failed to analyze."
+            "ats_score": 0.5,
+            "strengths": ["Error in generation"],
+            "weaknesses": [],
+            "recommendation": "Consider",
+            "reasoning": "Failed to analyze."
         }

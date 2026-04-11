@@ -144,27 +144,10 @@ with st.sidebar:
                     # Scoring
                     score, match_breakdown, emb_time, xgb_time = scorer.predict_score(res_parsed, jd_parsed, jd_embeddings=jd_embeds)
                     
-                    # --- GAUNTLET 3: Extreme Heuristic LLM Bypass ---
+                    # --- PASS 1: Generate Dummy Explanations (LLM Deferred to Pass 2) ---
                     t_exp_start = time.time()
-                    if score < 0.20:
-                        logger.info(f"LLM Reasoning Bypassed (Score < 0.20) for {res_file.name}")
-                        explanation = {"match_reason": "Heuristics classify this candidate as an extremely poor match. Skipping detailed generation.", "missing_skills": ["Many"], "strength_summary": "Lacking core requirements."}
-                        quality = {"quality_score": 3, "feedback": "Poor alignment with JD capabilities."}
-                    elif score > 0.85:
-                        logger.info(f"LLM Reasoning Bypassed (Score > 0.85) for {res_file.name}")
-                        explanation = {"match_reason": "Heuristics classify this candidate as an exceptional match.", "missing_skills": [], "strength_summary": "Strong skill overlap and deep experience alignment."}
-                        quality = {"quality_score": 9, "feedback": "Actionable, well-structured format."}
-                    else:
-                        analysis = analyze_and_explain(res_parsed, jd_parsed)
-                        explanation = {
-                            "match_reason": analysis.get("match_reason", ""),
-                            "missing_skills": analysis.get("missing_skills", []),
-                            "strength_summary": analysis.get("strength_summary", "")
-                        }
-                        quality = {
-                            "quality_score": analysis.get("quality_score", 0),
-                            "feedback": analysis.get("feedback", "")
-                        }
+                    explanation = {"match_reason": "Pending Top-N Reasoning Pass.", "missing_skills": [], "strength_summary": "Skipped to save API costs."}
+                    quality = {"quality_score": 0, "feedback": "Pending."}
                     t_exp_end = time.time()
                     exp_time = t_exp_end - t_exp_start
 
@@ -218,6 +201,35 @@ with st.sidebar:
                     progress_bar.progress((i + 1) / len(resume_files))
             
             ranked = rank_candidates(candidates)
+            
+            # --- PASS 2: Top-N LLM ATS Reasoning ---
+            top_n = min(20, len(ranked))
+            if top_n > 0:
+                with st.spinner(f"Initiating ATS Reasoning Phase on Top {top_n} profiles..."):
+                    for rank_idx in range(top_n):
+                        cand = ranked[rank_idx]
+                        if cand.get("score", 0) > 0.05: # Skip heavily rejected
+                            # Force analysis via the new LLM schema
+                            analysis = analyze_and_explain(cand["resume_json"], st.session_state.jd_parsed)
+                            cand["explanation"] = {
+                                "match_reason": analysis.get("reasoning", ""),
+                                "missing_skills": analysis.get("weaknesses", []),
+                                "strength_summary": ", ".join(analysis.get("strengths", []))
+                            }
+                            # Hack quality to map recommendations into UI
+                            rec = analysis.get("recommendation", "Consider")
+                            cand["quality"] = {
+                                "quality_score": 9 if "Strong" in rec else (6 if "Consider" in rec else 3),
+                                "feedback": rec
+                            }
+                            
+                            ats_score = analysis.get("ats_score", 0.0)
+                            
+                            # Integrate LLM layer back into final score (15% weight)
+                            cand["score"] = min(1.0, cand["score"] + (0.15 * float(ats_score)))
+                            
+            # Re-rank after applying final ATS modifiers
+            ranked = rank_candidates(ranked)
             st.session_state.candidates = ranked
             st.session_state.unranked_resumes = unranked
             st.session_state.runtime_stats = runtime_stats
@@ -365,31 +377,26 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
             st.write(cand['explanation'].get('strength_summary', ''))
             
             st.markdown("---")
-            st.markdown("**Match Breakdown (Features):**")
+            st.markdown("**Match Breakdown (Key Recruiter Signals):**")
             breakdown = cand['match_breakdown']
-            if breakdown:
-                strongest_key = max(breakdown, key=breakdown.get)
-                strongest_val = breakdown[strongest_key]
-                st.markdown(f"**Strongest Factor:** {strongest_key.replace('_', ' ').title()} ({strongest_val:.2f})", help="This was the highest individual matching feature.")
+            if breakdown and "rejection_reasons" in breakdown:
+                st.markdown(f"**Rejection Reasons:** {', '.join(breakdown['rejection_reasons'])}")
+            
+            # Show only high-signal metrics for decision making
             b_col1, b_col2, b_col3 = st.columns(3)
-            b_col1.metric("Skill Overlap", f"{breakdown.get('skill_overlap_score', 0):.2f}")
-            b_col2.metric("Education Match", f"{breakdown.get('education_match_score', 0):.2f}")
-            b_col3.metric("Experience Match", f"{breakdown.get('experience_years_score', breakdown.get('experience_match_score', 0)):.2f}")
+            b_col1.metric("Core Skill Coverage", f"{breakdown.get('core_skill_coverage', 0):.2f}", help="Percentage of MUST-HAVE skills identified.")
+            b_col2.metric("Experience Match", f"{breakdown.get('experience_years_score', 0):.2f}", help="Alignment with required tenure.")
+            b_col3.metric("Semantic Relevance", f"{breakdown.get('resume_jd_embedding_score', 0):.2f}", help="Deep contextual overlap between JD and Resume.")
             
             b_col4, b_col5, b_col6 = st.columns(3)
-            b_col4.metric("Responsibility Sim", f"{breakdown.get('responsibility_similarity_score', 0):.2f}")
-            b_col5.metric("Language Match", f"{breakdown.get('language_match_score', 0):.2f}")
-            b_col6.metric("Certification Match", f"{breakdown.get('certification_match_score', 0):.2f}")
+            b_col4.metric("Impact Score", f"{breakdown.get('impact_score', 0):.2f}", help="Frequency of measurable results (%, $, scaling).")
+            b_col5.metric("Career Progression", f"{breakdown.get('role_progression_score', 0):.2f}", help="Trajectory of seniority and growth.")
+            b_col6.metric("Job Stability", f"{breakdown.get('job_stability_score', 0):.2f}", help="Consistency of tenure across past roles.")
 
             b_col7, b_col8, b_col9 = st.columns(3)
-            b_col7.metric("Projects Score", f"{breakdown.get('projects_count_score', 0):.2f}")
-            b_col8.metric("Seniority Match", f"{breakdown.get('seniority_match_score', 0):.2f}")
-            b_col9.metric("Skill Breadth", f"{breakdown.get('skill_breadth_score', 0):.2f}")
-
-            b_col10, b_col11, b_col12 = st.columns(3)
-            b_col10.metric("Job Stability", f"{breakdown.get('job_stability_score', 0):.2f}")
-            b_col11.metric("Online Presence", f"{breakdown.get('online_presence_score', 0):.2f}")
-            b_col12.metric("Resp. Depth", f"{breakdown.get('responsibility_depth_score', 0):.2f}")
+            b_col7.metric("Tech Complexity", f"{breakdown.get('responsibility_complexity_score', 0):.2f}", help="Depth and density of technical responsibilities.")
+            b_col8.metric("Leadership Signal", f"{breakdown.get('leadership_experience_score', 0):.2f}", help="Mentorship, ownership, and management keywords.")
+            b_col9.metric("Education Match", f"{breakdown.get('education_match_score', 0):.2f}", help="Alignment with required degree and field.")
             
             st.markdown("---")
             st.markdown("**Extracted Resume Data Details:**")
