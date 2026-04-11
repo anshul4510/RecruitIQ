@@ -13,7 +13,20 @@ RecruitIQ is a production-grade, context-aware resume screening and ranking engi
 *   **Premium Recruiter Experience**: A high-fidelity, dark-mode dashboard featuring glassmorphism, interactive candidate cards, and real-time status tracking.
 *   **High-Performance Pipeline**: Implements multi-threaded processing and MD5-based persistence caching to ensure sub-second response times for batch uploads.
 *   **Qualitative Reasoning Layer**: A subordinate LLM layer provides evidence-based strengths, weaknesses, and hiring recommendations for Top-N candidates.
+*   **Candidate Comparison Modal**: Side-by-side evaluation tool for any two candidates, featuring metric delta highlights, shared skill intersections, and automated winner designation.
 *   **Automated Outreach**: One-click generation of personalized recruiter emails based on candidate strengths and JD alignment.
+
+## 🛠️ Technical Stack
+The system is built on a modern AI infrastructure designed for scale and precision:
+
+-   **Frontend & UI**: [Streamlit](https://streamlit.io/) (High-fidelity Dashboards), [Plotly](https://plotly.com/) (Interactive Analytics)
+-   **Machine Learning**: [LightGBM](https://lightgbm.readthedocs.io/) (LambdaMART Ranker), [XGBoost](https://xgboost.readthedocs.io/) (Fallback support), [Scikit-learn](https://scikit-learn.org/)
+-   **Natural Language Processing**: [Sentence-Transformers](https://www.sbert.net/) (Bi-Encoders for semantic matching), [LangChain](https://www.langchain.com/) (Orchestration)
+-   **Generative AI**: [Groq](https://groq.com/) / [OpenAI](https://openai.com/) (LLM Reasoning Layer)
+-   **Vector Search**: [Meta FAISS](https://github.com/facebookresearch/faiss) (Sub-millisecond semantic retrieval)
+-   **Data Processing**: [Pandas](https://pandas.pydata.org/), [NumPy](https://numpy.org/)
+-   **Extraction Pipeline**: [PDFPlumber](https://github.com/jsvine/pdfplumber), [PyTesseract](https://github.com/madmaze/pytesseract) (OCR), [PDF2Image](https://github.com/Belval/pdf2image)
+-   **Connectivity**: [Python-dotenv](https://saurabh-kumar.com/python-dotenv/) (Vaulted API Keys)
 
 ---
 
@@ -61,6 +74,8 @@ graph TD
     Engineer --> Predictor
     Predictor --> AI
     AI --> Main
+    Main --> Comparison[Comparison Logic]
+    Comparison --> Main
 ```
 
 ---
@@ -82,6 +97,7 @@ flowchart LR
         UC6(Tune ML Hyperparameters)
         UC7(Draft Outreach Emails)
         UC8(Export Analytics to CSV)
+        UC9(Compare Two Candidates)
     end
 
     Recruiter --> UC1
@@ -90,6 +106,7 @@ flowchart LR
     Recruiter --> UC5
     Recruiter --> UC7
     Recruiter --> UC8
+    Recruiter --> UC9
 
     Admin --> UC2
     Admin --> UC6
@@ -127,8 +144,15 @@ stateDiagram-v2
     
     LLM_Reasoning --> Dashboard
     Structural_Data --> Dashboard
-    Dashboard --> Outreach: Optional Action
+    
+    state Dashboard_Interaction {
+        Dashboard --> Comparison: Trigger Compare
+        Comparison --> Dashboard: Close Compare
+        Dashboard --> Outreach: Optional Action
+    }
+    
     Outreach --> [*]
+    Dashboard_Interaction --> [*]
 ```
 
 ### **3. Sequence Diagram (2-Pass Ranking Workflow)**
@@ -158,6 +182,13 @@ sequenceDiagram
     end
     
     UI->>UI: Render Metrics & Box UI
+    
+    opt Comparison Mode
+        UI->>UI: Select Candidate A & B
+        UI->>UI: Calculate Metric Deltas
+        UI->>UI: Show Skill Intersections
+    end
+
     Note right of UI: User clicks "Draft Outreach"
     UI->>AI: generate_outreach_email()
     AI-->>UI: Personalized Draft
@@ -233,8 +264,9 @@ classDiagram
     *   **Sidebar**: Batch-upload candidate resumes (Up to 100+ supported via concurrent processing).
     *   **Action**: Click "Process & Rank Candidates".
     *   **Review**: Inspect the "Key Recruiter Signals" grid for each candidate and the "Match Explanation" card.
+    *   **Compare**: Click the **🔍 Compare** button in the header to trigger the "Candidate Comparison Modal". Select any two candidates to see a side-by-side metric comparison and skill gap analysis.
     *   **Engage**: Use the "Draft Outreach" button to generate AI-tailored messages instantly.
-    *   **Export**: Use the "Export Data" button to pull all candidate contact details into an Excel-ready CSV format.
+    *   **Export**: Use the "Export" button in the header to pull all candidate contact details into an Excel-ready CSV format.
 
 ---
 
@@ -300,9 +332,15 @@ print(f"Execution took {duration:.4f} seconds")
 | Metric | Description | Formula | Use Case |
 | :--- | :--- | :--- | :--- |
 | **Final ATS Score** | Global rank of candidate fit | $W_{sum} \times Score$ | Recruitment Ranking |
+| **NDCG @ K** | Info Retrieval Accuracy | $DCG / IDCG$ | Model Training Quality |
 | **Core Coverage** | Percentage of mandatory skills | $Matched / Required$ | Hard Gating |
 | **Semantic Sim** | Semantic distance (Context) | $\frac{A \cdot B}{||A|| ||B||}$ | Bridging Synonyms |
-| **NDCG** | Information retrieval quality metric | $DCG / IDCG$ | Model Training Quality |
+
+### **The Machine Learning Model**
+The primary ranking engine is a **LightGBM LambdaRanker** trained using the `lambdarank` objective. It evaluates the candidate list using a list-wise approach, optimizing for **NDCG** (Normalized Discounted Cumulative Gain), which ensures that the most relevant candidates are positioned at the absolute top of the results. 
+- **Training Epochs**: 100 iterations
+- **Feature Set**: 50 Proprietary Dimensions (Structural + Semantic)
+- **Objective Function**: Pairwise/Listwise ranking probability (RankNet algorithm derivative)
 
 ---
 
