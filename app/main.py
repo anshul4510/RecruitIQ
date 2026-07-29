@@ -6,6 +6,15 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# Sync Streamlit Secrets into os.environ if running on Streamlit Cloud
+try:
+    if hasattr(st, "secrets"):
+        for sec_key in ["OPENAI_API_KEY", "GROQ_API_KEY"]:
+            if sec_key in st.secrets and not os.getenv(sec_key):
+                os.environ[sec_key] = str(st.secrets[sec_key])
+except Exception:
+    pass
+
 # Add parent directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

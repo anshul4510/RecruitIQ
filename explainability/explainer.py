@@ -6,28 +6,36 @@ from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 
-try:
-    llm = ChatOpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-mini", 
-        temperature=0.2,
-        model_kwargs={"response_format": {"type": "json_object"}}
-    )
-except Exception as e:
-    print(f"Warning: Failed to initialize ChatOpenAI explainer: {e}")
-    llm = None
+def get_llm(temperature=0.2, json_mode=True):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        kwargs = {}
+        if json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        return ChatOpenAI(
+            api_key=api_key,
+            model="gpt-4o-mini", 
+            temperature=temperature,
+            model_kwargs=kwargs
+        )
+    except Exception as e:
+        print(f"Warning: Failed to initialize ChatOpenAI explainer: {e}")
+        return None
 
 def analyze_and_explain(resume_json, jd_json):
     """
     Returns an expert explanation of a top candidate's match quality.
     """
-    if not llm:
+    active_llm = get_llm(temperature=0.2, json_mode=True)
+    if not active_llm:
         return {
             "ats_score": 0.5,
             "strengths": ["LLM unconfigured"],
             "weaknesses": ["LLM unconfigured"],
             "recommendation": "Consider",
-            "reasoning": "LLM not configured. Please add OPENAI_API_KEY to .env."
+            "reasoning": "LLM not configured. Please set OPENAI_API_KEY."
         }
 
     prompt_template = """
@@ -57,7 +65,7 @@ def analyze_and_explain(resume_json, jd_json):
     {jd}
     """
     prompt = PromptTemplate(input_variables=["resume", "jd"], template=prompt_template)
-    chain = prompt | llm
+    chain = prompt | active_llm
     
     try:
         response = chain.invoke({"resume": json.dumps(resume_json), "jd": json.dumps(jd_json)})
@@ -78,17 +86,11 @@ def generate_outreach_email(resume_json, jd_json, explanation=None):
     """
     Generates a personalized outreach email for the candidate based on their resume and the JD.
     """
-    if not llm:
-        return "LLM not configured. Please add OPENAI_API_KEY to .env."
+    email_llm = get_llm(temperature=0.7, json_mode=False)
+    if not email_llm:
+        return "LLM not configured. Please set OPENAI_API_KEY."
 
     try:
-        # Create a less strict version of the LLM for plain text generation
-        email_llm = ChatOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            model="gpt-4o-mini", 
-            temperature=0.7
-        )
-
         prompt_template = """
         You are a technical recruiter reaching out to a candidate who looks like a great fit for your open role.
         

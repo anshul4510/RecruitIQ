@@ -1,8 +1,10 @@
 streamlit
+streamlit-extras
 pandas
 numpy
 scikit-learn
 xgboost
+lightgbm
 sentence-transformers
 faiss-cpu
 plotly
@@ -13,4 +15,4 @@ pytesseract
 langchain
 langchain-openai
 langchain-groq
-lightgbm
+joblib

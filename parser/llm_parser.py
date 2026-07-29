@@ -11,29 +11,28 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
-# Initialize the OpenAI LLM (was Groq)
-try:
-    # llm = ChatGroq(
-    #     api_key=os.getenv("GROQ_API_KEY"),
-    #     model_name="openai/gpt-oss-120b", 
-    #     temperature=0
-    # )
-    llm = ChatOpenAI(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        model="gpt-4o-mini", 
-        temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}}
-    )
-except Exception as e:
-    logger.error(f"Failed to initialize ChatOpenAI: {e}. Please ensure OPENAI_API_KEY is in your .env file.")
-    llm = None
+def get_llm():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    try:
+        return ChatOpenAI(
+            api_key=api_key,
+            model="gpt-4o-mini", 
+            temperature=0,
+            model_kwargs={"response_format": {"type": "json_object"}}
+        )
+    except Exception as e:
+        logger.error(f"Failed to initialize ChatOpenAI: {e}")
+        return None
 
 def parse_resume(text):
     """
     Passes the raw resume text to the LLM and demands a JSON response with the requested fields.
     """
-    if not llm:
-        return {"error": "LLM was not initialized. Check OPENAI_API_KEY in .env"}
+    active_llm = get_llm()
+    if not active_llm:
+        return {"error": "LLM was not initialized. Check OPENAI_API_KEY."}
 
     prompt_template = """
     You are an expert HR parser. Extract the following information from the provided resume text.
@@ -64,7 +63,7 @@ def parse_resume(text):
     {text}
     """
     prompt = PromptTemplate(input_variables=["text"], template=prompt_template)
-    chain = prompt | llm
+    chain = prompt | active_llm
     
     try:
         # Strictly limit the input text to 4000 chars to never exceed Groq TPM limits
@@ -83,8 +82,9 @@ def parse_job_description(text):
     """
     Passes the raw JD text to the LLM and demands a JSON response with the requested fields.
     """
-    if not llm:
-        return {"error": "LLM was not initialized. Check OPENAI_API_KEY in .env"}
+    active_llm = get_llm()
+    if not active_llm:
+        return {"error": "LLM was not initialized. Check OPENAI_API_KEY."}
 
     prompt_template = """
     You are an expert HR parser. Extract the following information from the provided job description text.
@@ -105,7 +105,7 @@ def parse_job_description(text):
     {text}
     """
     prompt = PromptTemplate(input_variables=["text"], template=prompt_template)
-    chain = prompt | llm
+    chain = prompt | active_llm
     
     try:
         text = text[:4000]
