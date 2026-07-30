@@ -51,11 +51,12 @@ def filter_candidates(candidates, min_score=None, required_skills=None):
         filtered = [c for c in filtered if c.get('score', 0) >= min_score]
         
     if required_skills and len(required_skills) > 0:
-        req_skills_lower = set(s.lower().strip() for s in required_skills)
-        def has_skills(c):
-            c_skills = set(str(s).lower().strip() for s in c.get('resume_json', {}).get('skills', []))
-            return len(req_skills_lower.intersection(c_skills)) > 0
-        filtered = [c for c in filtered if has_skills(c)]
+        req_skills_lower = set(s.lower().strip() for s in required_skills if s and str(s).strip())
+        if req_skills_lower:
+            def has_skills(c):
+                c_skills = set(str(s).lower().strip() for s in c.get('resume_json', {}).get('skills', []))
+                return len(req_skills_lower.intersection(c_skills)) > 0
+            filtered = [c for c in filtered if has_skills(c)]
         
     logger.info(f"Filtered {len(candidates)} candidates down to {len(filtered)}")
     return filtered

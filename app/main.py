@@ -27,7 +27,6 @@ from explainability.explainer import analyze_and_explain, generate_outreach_emai
 from utils.logging_config import setup_logging
 from utils.cache_manager import pipeline_cache
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from streamlit_extras.stylable_container import stylable_container
 
 # Initialize logging
 logger = setup_logging(__name__)
@@ -112,6 +111,23 @@ st.markdown("""
     div[key^="explain_"] .box { border-left: 4px solid #6366f1 !important; }
     div[key^="strength_"] .box { border-left: 4px solid #22c55e !important; }
     div[key^="weakness_"] .box { border-left: 4px solid #ef4444 !important; }
+
+    /* Keyed Containers Styling */
+    div[class*="st-key-metrics_funnel"], div[key="metrics_funnel"] {
+        background: rgba(30, 41, 59, 0.3) !important;
+        padding: 20px !important;
+        border-radius: 16px !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        margin-bottom: 20px !important;
+    }
+    
+    div[class*="st-key-compare_selection"], div[key="compare_selection"] {
+        background: rgba(30, 41, 59, 0.3) !important;
+        padding: 15px !important;
+        border-radius: 12px !important;
+        border: 1px solid rgba(255, 255, 255, 0.05) !important;
+        margin-bottom: 20px !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -126,6 +142,92 @@ if "candidate_status" not in st.session_state:
     st.session_state.candidate_status = {}
 if "compare_mode" not in st.session_state:
     st.session_state.compare_mode = False
+if "open_jd_dialog" not in st.session_state:
+    st.session_state.open_jd_dialog = False
+
+# JD Breakdown Modal
+if hasattr(st, "dialog"):
+    @st.dialog("Job Description Breakdown", width="large")
+    def show_jd_modal():
+        jd = st.session_state.get("jd_parsed")
+        if not jd:
+            st.warning("No Job Description processed yet.")
+            return
+        
+        pos_name = jd.get("job_position_name", "Job Position")
+        st.markdown(f"## {pos_name}")
+        st.markdown("---")
+        
+        exp_req = str(jd.get("experience_requirement", "Not specified"))
+        edu_req = str(jd.get("educational_requirements", "Not specified"))
+        sal_req = str(jd.get("salary_range", "Not specified"))
+        age_req = str(jd.get("age_requirement", "Any"))
+        
+        def clean_metric(val, max_len=25):
+            if not val or str(val).lower() in ["none", "null", "n/a", ""]:
+                return "Not specified"
+            v = str(val).strip()
+            if len(v) > max_len:
+                return v[:max_len] + "..."
+            return v
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Experience Needed", clean_metric(exp_req))
+        col2.metric("Education Needed", clean_metric(edu_req))
+        col3.metric("Salary Range", clean_metric(sal_req))
+        col4.metric("Age Threshold", clean_metric(age_req))
+        
+        if len(exp_req) > 25 or len(edu_req) > 25 or (sal_req and len(sal_req) > 25):
+            with st.expander("Full Requirements & Salary Notes", expanded=False):
+                st.markdown(f"**Experience:** {exp_req}")
+                st.markdown(f"**Education:** {edu_req}")
+                st.markdown(f"**Salary / Pay:** {sal_req}")
+        
+        st.markdown("---")
+        st.markdown("### Required & Market Tech Stack Skills")
+        
+        from parser.llm_parser import process_and_decompose_skills
+        
+        explicit = process_and_decompose_skills(jd.get("explicit_skills", []))
+        inferred = process_and_decompose_skills(jd.get("inferred_skills", []))
+        all_req = process_and_decompose_skills(jd.get("skills_required", []))
+        
+        if not explicit and not inferred and all_req:
+            explicit = all_req
+        
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            st.markdown("**Explicit & Basic Skills:**")
+            if explicit:
+                st.write(", ".join(explicit))
+            else:
+                st.write("N/A")
+        with sc2:
+            st.markdown("**AI Market-Inferred Skills:**")
+            if inferred:
+                st.write(", ".join(inferred))
+            else:
+                st.caption("None inferred.")
+                
+        if all_req:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("**All Combined Skills:**")
+            st.write(", ".join(all_req))
+                
+        resps = jd.get("responsibilities", [])
+        if resps:
+            st.markdown("---")
+            st.markdown("### Key Responsibilities & Role Duties")
+            for r in resps:
+                st.markdown(f"- {r}")
+
+        st.markdown("---")
+        if st.button("Close Breakdown", key="btn_close_jd_dialog"):
+            st.session_state.open_jd_dialog = False
+            st.rerun()
+
+    if st.session_state.open_jd_dialog:
+        show_jd_modal()
 
 # Sidebar for Uploads
 with st.sidebar:
@@ -133,6 +235,12 @@ with st.sidebar:
     jd_file = st.file_uploader("Upload Job Description (PDF)", type=["pdf"])
     resume_files = st.file_uploader("Upload Resumes (PDF)", type=["pdf"], accept_multiple_files=True)
     
+    if st.session_state.get("jd_parsed") and "error" not in st.session_state.jd_parsed:
+        if st.button("View JD Breakdown", use_container_width=True, help="Open structured summary of the parsed Job Description"):
+            st.session_state.open_jd_dialog = True
+            st.rerun()
+        st.markdown("---")
+        
     if st.button("Process & Rank Candidates"):
         if not jd_file or not resume_files:
             st.error("Please upload both JD and at least one Resume.")
@@ -340,18 +448,7 @@ with st.sidebar:
 if st.session_state.candidates and st.session_state.jd_parsed is not None:
 
 
-    with stylable_container(
-        key="metrics_funnel",
-        css_styles="""
-            {
-                background: rgba(30, 41, 59, 0.3);
-                padding: 20px;
-                border-radius: 16px;
-                border: 1px solid rgba(255, 255, 255, 0.05);
-                margin-bottom: 20px;
-            }
-        """
-    ):
+    with st.container(key="metrics_funnel"):
         funnel_cols = st.columns(4)
         total_cands = len(st.session_state.candidates)
         shortlisted = sum(1 for stat in st.session_state.candidate_status.values() if stat == "Shortlisted")
@@ -379,10 +476,17 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
             
         st.markdown("---")
         st.header("Screening Filters")
+        
+        inferred_skills_list = st.session_state.jd_parsed.get('inferred_skills', []) if st.session_state.jd_parsed else []
+        if inferred_skills_list:
+            with st.expander("AI Market-Inferred Skills", expanded=False):
+                st.caption("Skills automatically inferred based on modern tech stack & market standards:")
+                st.write(", ".join(inferred_skills_list))
+
         min_score = st.slider("Minimum Match Score", 0.0, 1.0, 0.0, 0.05)
         default_skills = ", ".join(st.session_state.jd_parsed.get('skills_required', []))
-        req_skills_input = st.text_input("Required Skills (comma separated)", value=default_skills)
-        req_skills = [s.strip() for s in req_skills_input.split(',')] if req_skills_input else None
+        req_skills_input = st.text_input("Required Skills (comma separated)", value="", placeholder=f"e.g. {default_skills}" if default_skills else "e.g. Python, SQL")
+        req_skills = [s.strip() for s in req_skills_input.split(',') if s.strip()] if req_skills_input and req_skills_input.strip() else None
         
         filtered_candidates = filter_candidates(st.session_state.candidates, min_score, req_skills)
         
@@ -401,7 +505,7 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
         if status == "Rejected": return 2
         return 1
         
-    filtered_candidates.sort(key=status_sort_key)
+    filtered_candidates.sort(key=lambda c: (status_sort_key(c), -c.get('score', 0)))
     
     # Prepare Data for Excel Sheet Export
     export_data = []
@@ -423,13 +527,16 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
     
 
     
-    header_col1, header_col2, header_col3 = st.columns([4, 1, 1])
+    header_col1, header_col2, header_col3 = st.columns([3, 1.2, 1])
     with header_col1:
         if not filtered_candidates:
             st.warning("No candidates match the current filters.")
         else:
             list_title = "Ranked Candidates" if not st.session_state.compare_mode else "Comparing Candidates"
             st.subheader(f"{list_title} ({len(filtered_candidates)})")
+            if st.button("View JD Breakdown", key="main_header_jd_btn", help="Open parsed Job Description details"):
+                st.session_state.open_jd_dialog = True
+                st.rerun()
             
     with header_col2:
         compare_label = "✖ Close Compare" if st.session_state.compare_mode else "🔍 Compare"
@@ -469,18 +576,7 @@ if st.session_state.candidates and st.session_state.jd_parsed is not None:
 
             names = list(options.keys())
 
-            with stylable_container(
-                key="compare_selection",
-                css_styles="""
-                    {
-                        background: rgba(30, 41, 59, 0.3);
-                        padding: 15px;
-                        border-radius: 12px;
-                        border: 1px solid rgba(255, 255, 255, 0.05);
-                        margin-bottom: 20px;
-                    }
-                """
-            ):
+            with st.container(key="compare_selection"):
                 sel_col1, sel_col2, btn_col = st.columns([2, 2, 1])
                 with sel_col1:
                     cand_a_name = st.selectbox("Select Candidate A", options=names, index=0)

@@ -43,11 +43,25 @@ def extract_years_from_text(text):
 # --- A. EXISTING FEATURES (UNCHANGED 13) ---
 def calculate_skill_overlap(resume_skills, jd_skills):
     if not resume_skills or not jd_skills: return 0.0
-    synonym_map = {'mysql': 'sql', 'postgresql': 'sql', 'aws': 'amazon web services', 'gcp': 'google cloud', 'ml': 'machine learning'}
-    r_skills_lower = set(synonym_map.get(str(s).lower().strip(), str(s).lower().strip()) for s in resume_skills)
-    j_skills_lower = set(synonym_map.get(str(s).lower().strip(), str(s).lower().strip()) for s in jd_skills)
-    if not j_skills_lower: return 0.0
-    return len(r_skills_lower.intersection(j_skills_lower)) / len(j_skills_lower)
+    synonym_map = {
+        'mysql': 'sql', 'postgresql': 'sql', 'postgres': 'sql', 'aws': 'amazon web services', 
+        'gcp': 'google cloud', 'ml': 'machine learning', 'py': 'python', 'js': 'javascript',
+        'ts': 'typescript', 'react.js': 'react', 'node.js': 'node', 'html': 'html5', 'css': 'css3'
+    }
+    r_set = set(synonym_map.get(str(s).lower().strip(), str(s).lower().strip()) for s in resume_skills if s)
+    j_set = set(synonym_map.get(str(s).lower().strip(), str(s).lower().strip()) for s in jd_skills if s)
+    
+    if not j_set: return 0.0
+    
+    matches = float(len(r_set.intersection(j_set)))
+    for r in r_set:
+        for j in j_set:
+            if r != j and (r in j or j in r) and len(r) > 2 and len(j) > 2:
+                matches += 0.5
+                break
+                
+    ratio = min(1.0, (matches * 1.5) / max(1.0, min(float(len(j_set)), 12.0)))
+    return float(ratio)
 
 def calculate_education_match(resume_degrees, jd_edu):
     return EducationProcessor.calculate_match_score(resume_degrees, jd_edu)
@@ -74,31 +88,28 @@ def calculate_seniority_match(resume_positions, jd_title):
 
 # --- B. SKILL INTELLIGENCE ---
 def calc_core_skill_coverage(res_skills, req_skills):
-    if not req_skills: return 1.0
-    rs = set(s.lower().strip() for s in res_skills)
-    rq = set(s.lower().strip() for s in req_skills)
-    return len(rs.intersection(rq)) / len(rq) if rq else 0.0
+    return calculate_skill_overlap(res_skills, req_skills)
 
 def calc_skill_relevance_score(res_skills, req_skills):
-    return calc_core_skill_coverage(res_skills, req_skills)  # Proxy for weights
+    return calc_core_skill_coverage(res_skills, req_skills)
 
 def calc_skill_context_score(req_skills, responsibilities):
     if not req_skills: return 1.0
     resp_text = " ".join(responsibilities).lower()
     matched = sum(1 for s in req_skills if str(s).lower() in resp_text)
-    return matched / len(req_skills)
+    return min(1.0, (matched * 1.5) / max(1.0, float(len(req_skills))))
 
 def calc_skill_frequency_score(res_skills, responsibilities):
     return min(1.0, len(res_skills) / max(1, len(responsibilities)))
 
 def calc_rare_skill_bonus(res_skills):
     rare = {'triton', 'jax', 'ebpf', 'cuda', 'rust', 'golang', 'solidity'}
-    rs = set(s.lower().strip() for s in res_skills)
+    rs = set(s.lower().strip() for s in res_skills if s)
     return min(1.0, len(rs.intersection(rare)) * 0.15)
 
 def calc_skill_recency_score(): return 0.8
 def calc_skill_group_match_score(): return 0.7
-def calc_skill_depth_score(): return 0.65
+def calc_skill_depth_score(): return 0.7
 
 # --- C. EXPERIENCE INTELLIGENCE ---
 def calc_experience_relevance_score(): return 0.8
@@ -160,9 +171,12 @@ def calc_experience_embedding_score(r_exp, j_req, model):
 
 
 def engineer_features_for_single(resume_json, jd_json, model, jd_embeddings=None):
-    # Base extracted
+    # Base extracted - Guarantee both explicit and implicit/inferred skills are included for ranking
     r_skills = resume_json.get('skills', [])
-    j_skills = jd_json.get('skills_required', [])
+    j_explicit = jd_json.get('explicit_skills', [])
+    j_inferred = jd_json.get('inferred_skills', [])
+    j_req_base = jd_json.get('skills_required', [])
+    j_skills = list(dict.fromkeys(j_explicit + j_inferred + j_req_base))
     r_edu = resume_json.get('degree_names', [])
     j_edu = jd_json.get('educational_requirements', '')
     r_resp_list = resume_json.get('responsibilities', [])

@@ -34,7 +34,7 @@ class ResumeScorerModel:
             res_emb = self.sbert.encode(resume_text[:1000])
             jd_emb = self.sbert.encode(jd_text[:1000])
             sim = np.dot(res_emb, jd_emb) / (np.linalg.norm(res_emb) * np.linalg.norm(jd_emb))
-            return bool(sim < 0.10)
+            return bool(sim < 0.01)
         except: return False
         
     def predict_score(self, resume_json, jd_json, jd_embeddings=None):
